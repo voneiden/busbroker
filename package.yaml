@@ -26,7 +26,8 @@ dependencies:
 - stm-chans
 - split
 - network
-- network-multicast
+- network-simple
+- safe-exceptions
 - bytestring
 - utf8-string
 - tomland

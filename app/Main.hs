@@ -3,108 +3,90 @@
 
 module Main where
 
-import Control.Concurrent (forkIO, killThread)
+import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.STM (STM, atomically)
 import Control.Concurrent.STM.TBQueue (TBQueue, newTBQueue, readTBQueue, writeTBQueue)
+import qualified Data.List as List (filter)
 import Data.List.Split (splitOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Types.PubMessage (PubMessage (PubMessage))
-import qualified Types.PubMessage as PubMessage (PubMessage (..))
-import Types.RouteMessage (RouteMessage (RouteMessage))
-import qualified Types.RouteMessage as RouteMessage (RouteMessage (..))
-import Types.SubMessage (SubMessage (SubMessage, UnsubMessage))
-import qualified Types.SubMessage as SubMessage (SubMessage (..))
--- |
---  MQTT style topic matching.
-matchTopic :: String -> String -> Bool
-matchTopic subTopic pubTopic = matchTopic' (splitOn "/" subTopic) (splitOn "/" pubTopic)
-  where
-    matchTopic' :: [String] -> [String] -> Bool
-    matchTopic' ("#" : _) _ = True                              -- Multi-level wildcard
-    matchTopic' ("+" : ss) (_ : ps) = matchTopic' ss ps         -- Single-level wildcard
-    matchTopic' (s : ss) (p : ps) = s == p && matchTopic' ss ps -- Regular level match
-    matchTopic' [] [] = True                                    -- Fully matched
-    matchTopic' _ _ = False                                     -- otherwise: mismatch
+import Queues.Publish (PublishMessage (PublishMessage), PublishQueue (PublishQueue), DeliveryQueue (DeliveryQueue))
+import qualified Queues.Publish as PublishMessage (PublishMessage (..))
+import Queues.AlterRoute (AlterRouteMessage (AddRouteMessage, DropRouteMessage), topic, queue, AlterRouteQueue (AlterRouteQueue))
+import Control.Monad (forM_)
+import qualified Queues.Queue as Q (recv, send)
+import RouteMap (RouteMap (RouteMap), findRoutes)
+import Data.Coerce (coerce)
+--import qualified Types.SubMessage.ModifyRouteMessage as SubMessage (SubMessage (..))
 
-findRoutes :: Map String [TBQueue RouteMessage] -> PubMessage -> [TBQueue RouteMessage]
-findRoutes clientRouteMap msg = do
-  concat $ Map.elems $ Map.filterWithKey f clientRouteMap
-  where
-    f :: String -> [TBQueue RouteMessage] -> Bool
-    f subTopic _ = matchTopic subTopic pubTopic
-      where
-        pubTopic = PubMessage.topic msg
+maybeList :: [a] -> Maybe [a]
+maybeList [] = Nothing
+maybeList x = Just x
 
-routePub :: Map String [TBQueue RouteMessage] -> TBQueue PubMessage -> STM ()
-routePub clientRouteMap pubQueue = do
-  -- TBQueue RouteMessage
-  msg <- readTBQueue pubQueue
-  let routes = findRoutes clientRouteMap msg
-  _ <- foldl1 (>>) $ map (route (PubMessage.topic msg) (PubMessage.message msg)) routes
+routePub :: RouteMap -> PublishQueue -> STM ()
+routePub routeMap publishQueue = do
+  msg <- Q.recv publishQueue
+  _ <- case findRoutes routeMap msg of
+    [] -> return ()
+    routes -> foldl1 (>>) $ map (route (PublishMessage.topic msg) (PublishMessage.message msg)) routes
   return ()
   where
-    route :: String -> String -> TBQueue RouteMessage -> STM ()
-    route topic message routeQueue = writeTBQueue routeQueue (RouteMessage topic message)
+    route :: String -> String -> DeliveryQueue -> STM ()
+    route topic message routeQueue = Q.send routeQueue (PublishMessage topic message)
 
 
-router :: Map String [TBQueue RouteMessage] -> TBQueue PubMessage -> IO ()
-router clientRouteMap pubQueue = do
+router :: RouteMap -> PublishQueue -> IO ()
+router routeMap pubQueue = do
   print ("Start router")
-  _ <- atomically (routePub clientRouteMap pubQueue)
+  _ <- atomically (routePub routeMap pubQueue)
   print ("Got pub")
-  router clientRouteMap pubQueue
+  router routeMap pubQueue
+  print("Routed")
 
 
-resolveSubRequest :: SubMessage -> Map String [TBQueue RouteMessage] -> Map String [TBQueue RouteMessage]
-resolveSubRequest SubMessage{..} clientRouteMap = Map.insertWith (++) topic [queue] clientRouteMap
-resolveSubRequest UnsubMessage{..} clientRouteMap = Map.mapMaybe removeUnsubbed clientRouteMap
-  where
-    removeUnsubbed :: [TBQueue RouteMessage] -> Maybe [TBQueue RouteMessage]
-    removeUnsubbed queues = allOrNothing $ skipMatch queues
-      where
-        skipMatch :: [TBQueue RouteMessage] -> [TBQueue RouteMessage]
-        skipMatch [] = []
-        skipMatch (rm:rms)
-          | rm == queue = skipMatch rms
-          | otherwise = rm : skipMatch rms
-        allOrNothing :: [TBQueue RouteMessage] -> Maybe [TBQueue RouteMessage]
-        allOrNothing [] = Nothing
-        allOrNothing x = Just x
+-- |
+--  Process SubMessage
+--
+resolveSubRequest :: AlterRouteMessage -> RouteMap -> RouteMap
+resolveSubRequest AddRouteMessage{..} (RouteMap routeMap) = RouteMap $ Map.insertWith (++) topic [queue] routeMap
+resolveSubRequest DropRouteMessage{..} (RouteMap routeMap) = RouteMap $ Map.mapMaybe (maybeList . List.filter (/=queue)) routeMap
+
 -- |
 --  routerManager is responsible for maintaining a route map and the router thread
 --  It takes one argument, of type 'Int'.
-routerManager :: Map String [TBQueue RouteMessage] -> TBQueue SubMessage -> TBQueue PubMessage -> IO ()
-routerManager clientRouteMap subQueue pubQueue = do
+routerManager :: RouteMap -> AlterRouteQueue -> PublishQueue -> IO ()
+routerManager routeMap alterRouteQueue pubQueue = do
   print ("Start routerManager")
-  print (Map.keys clientRouteMap)
-  routerThreadId <- forkIO $ router clientRouteMap pubQueue
-  subRequest <- atomically (readTBQueue subQueue)
+  print (Map.keys (coerce routeMap :: Map String [DeliveryQueue]))
+  routerThreadId <- forkIO $ router routeMap pubQueue
+  subRequest <- atomically $ Q.recv alterRouteQueue
   killThread routerThreadId
-  routerManager (resolveSubRequest subRequest clientRouteMap) subQueue pubQueue
+  print("Alter route received")
+  routerManager (resolveSubRequest subRequest routeMap) alterRouteQueue pubQueue
 
-test :: TBQueue SubMessage -> TBQueue PubMessage -> IO ()
-test subQueue pubQueue = do
-  route <- atomically $ newTBQueue 1000
-  _ <- atomically $ writeTBQueue subQueue (SubMessage "test" route)
-  _ <- atomically $ writeTBQueue pubQueue (PubMessage "test" "Hello world")
-  result <- atomically $ readTBQueue route
-  print $ RouteMessage.message result
-  _ <- atomically $ writeTBQueue subQueue (SubMessage "test/+/kikki" route)
-  _ <- atomically $ writeTBQueue pubQueue (PubMessage "test/foo/kikki" "Hello kikki")
-  result <- atomically $ readTBQueue route
-  print $ RouteMessage.message result
-  _ <- atomically $ writeTBQueue subQueue (UnsubMessage route)
+test :: AlterRouteQueue -> PublishQueue -> IO ()
+test alterRouteQueue publishQueue = do
+  route <- atomically $ DeliveryQueue <$> newTBQueue 1000
+  _ <- atomically $ Q.send alterRouteQueue (AddRouteMessage "test" route)
+  threadDelay 100
+  _ <- atomically $ Q.send publishQueue (PublishMessage "test" "Hello world")
+  result <- atomically $ Q.recv route
+  print $ PublishMessage.message result
+  _ <- atomically $ Q.send alterRouteQueue (AddRouteMessage "test/+/kikki" route)
+  threadDelay 100
+  _ <- atomically $ Q.send publishQueue (PublishMessage "test/foo/kikki" "Hello kikki")
+  print("Waiting for response vvv")
+  result <- atomically $ Q.recv route
+  print("Got response")
+  print $ PublishMessage.message result
+  _ <- atomically $ Q.send alterRouteQueue (DropRouteMessage route)
   return ()
 
 main :: IO ()
 main = do
-  subQueue <- atomically $ newTBQueue 1000
-  pubQueue <- atomically $ newTBQueue 1000
-  _ <- forkIO $ test subQueue pubQueue
-  routerManager Map.empty subQueue pubQueue
-  print "OK"
+  alterRouteQueue <- atomically $ AlterRouteQueue <$> newTBQueue 1000
+  publishQueue <- atomically $ PublishQueue <$> newTBQueue 1000
+  _ <- forkIO $ test alterRouteQueue publishQueue
+  routerManager (RouteMap Map.empty) alterRouteQueue publishQueue
   return ()
 
-
--- todo verkkoserveri

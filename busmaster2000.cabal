@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: e1f1c375f403582820fe715199668a41dc84e72b42fa37a1a20ba8f1a5eab750
+-- hash: 762128123d5450b65f0e0bea63aac04a1c494add71f06e68022fba33accb92f0
 
 name:           busmaster2000
 version:        0.1.0.0
@@ -15,7 +15,6 @@ author:         Author name here
 maintainer:     Author email here
 copyright:      2019 Author name here
 license:        BSD3
-license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     README.md
@@ -27,11 +26,10 @@ source-repository head
 
 library
   exposed-modules:
-      Lib
-      Types.PubMessage
-      Types.RouteMessage
-      Types.SubMessage
-      Types.UnsubMessage
+      Queues.AlterRoute
+      Queues.Publish
+      Queues.Queue
+      RouteMap
   other-modules:
       Paths_busmaster2000
   hs-source-dirs:
@@ -41,7 +39,8 @@ library
     , bytestring
     , containers
     , network
-    , network-multicast
+    , network-simple
+    , safe-exceptions
     , split
     , stm
     , stm-chans
@@ -52,6 +51,7 @@ library
 executable busmaster2000-exe
   main-is: Main.hs
   other-modules:
+      Net
       Paths_busmaster2000
   hs-source-dirs:
       app
@@ -62,7 +62,8 @@ executable busmaster2000-exe
     , bytestring
     , containers
     , network
-    , network-multicast
+    , network-simple
+    , safe-exceptions
     , split
     , stm
     , stm-chans
@@ -84,7 +85,8 @@ test-suite busmaster2000-test
     , bytestring
     , containers
     , network
-    , network-multicast
+    , network-simple
+    , safe-exceptions
     , split
     , stm
     , stm-chans
