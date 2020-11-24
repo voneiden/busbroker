@@ -11,7 +11,4 @@ serveTCP = serve HostIPv4 "48350" handleAccept
 
 handleAccept :: (Socket, SockAddr) -> IO ()
 handleAccept (socket, addr) = do
-  Ex.catch
-    (void (acceptFork lsock k))
-    Ex.throw
   putStrLn $ "TCP connection established from " ++ show addr

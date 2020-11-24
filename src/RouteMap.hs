@@ -5,9 +5,9 @@ module RouteMap where
 import Data.List.Split (splitOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Queues.Publish (DeliveryQueue, PublishMessage (PublishMessage), topic)
+import Queues.Publish (Publish (Publish), PublishQueue, topic)
 
-newtype RouteMap = RouteMap (Map String [DeliveryQueue])
+newtype RouteMap = RouteMap (Map String [PublishQueue])
 
 -- |
 --  MQTT style topic matching.
@@ -21,9 +21,9 @@ matchTopic subTopic pubTopic = matchTopic' (splitOn "/" subTopic) (splitOn "/" p
     matchTopic' [] [] = True -- Fully matched
     matchTopic' _ _ = False -- otherwise: mismatch
 
-findRoutes :: RouteMap -> PublishMessage -> [DeliveryQueue]
-findRoutes (RouteMap routeMap) PublishMessage {topic = pubTopic} = do
+findRoutes :: RouteMap -> Publish -> [PublishQueue]
+findRoutes (RouteMap routeMap) Publish {topic = pubTopic} = do
   concat $ Map.elems $ Map.filterWithKey f routeMap
   where
-    f :: String -> [DeliveryQueue] -> Bool
+    f :: String -> [PublishQueue] -> Bool
     f subTopic _ = matchTopic subTopic pubTopic
