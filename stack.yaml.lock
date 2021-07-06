@@ -5,12 +5,12 @@
 
 packages:
 - completed:
-    hackage: network-multicast-0.3.2@sha256:521547635a6afae408ec25193b3e429082dc0442668dac7ad5cea76ccee39750,979
+    hackage: network-3.1.2.0@sha256:3ace4c1cab0d8f7a0029188e0887a0526f0e148dccb4473eec65806c81df3a1d,4962
     pantry-tree:
-      size: 393
-      sha256: 3a7b55c4427288622cb2b21a14dd5b4da2a7b3bcad50384db9b0435a0aaacc65
+      size: 3971
+      sha256: fc7599404df3c29a28e73a298b6469b5be4511738cc4697f0372b2c755c7d89f
   original:
-    hackage: network-multicast-0.3.2@sha256:521547635a6afae408ec25193b3e429082dc0442668dac7ad5cea76ccee39750,979
+    hackage: network-3.1.2.0@sha256:3ace4c1cab0d8f7a0029188e0887a0526f0e148dccb4473eec65806c81df3a1d,4962
 snapshots:
 - completed:
     size: 532177

@@ -41,7 +41,7 @@ packages:
 #
 # extra-deps: []
 extra-deps:
-- network-multicast-0.3.2@sha256:521547635a6afae408ec25193b3e429082dc0442668dac7ad5cea76ccee39750,979
+- network-3.1.2.0@sha256:3ace4c1cab0d8f7a0029188e0887a0526f0e148dccb4473eec65806c81df3a1d,4962
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

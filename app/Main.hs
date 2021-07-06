@@ -3,28 +3,28 @@
 
 module Main where
 
+import AlterRoute (AlterRoute (AddRoute, DropRoute), AlterRouteQueue (AlterRouteQueue))
+import qualified AlterRoute (AlterRoute (..))
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.STM (STM, atomically)
-import Control.Concurrent.STM.TBQueue (TBQueue, newTBQueue, readTBQueue, writeTBQueue)
+import Control.Concurrent.STM.TBQueue (newTBQueue)
+import Data.Coerce (coerce)
 import qualified Data.List as List (filter)
-import Data.List.Split (splitOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Queues.Publish (Publish (Publish), PublishQueue (PublishQueue))
-import qualified Queues.Publish as Publish (Publish (..))
-import Queues.Request (Request (AddRouteRequest, DropRouteRequest, PublishRequest), topic, queue, RequestQueue (RequestQueue))
-import Control.Monad (forM_)
-import qualified Queues.Queue as Q (recv, send)
+import Publish (Publish (Publish), PublishQueue (PublishQueue), RoutePublishQueue (RoutePublishQueue))
+import qualified Publish (Publish (..))
+import qualified Queue as Q (recv, send)
 import RouteMap (RouteMap (RouteMap), findRoutes)
-import Data.Coerce (coerce)
+import Net (runTCPServer)
 --import qualified Types.SubMessage.ModifyRouteMessage as SubMessage (SubMessage (..))
 
 maybeList :: [a] -> Maybe [a]
 maybeList [] = Nothing
 maybeList x = Just x
 
-routePub :: RouteMap -> PublishQueue -> STM ()
-routePub routeMap publishQueue = do
+routerPublish :: RouteMap -> RoutePublishQueue -> STM ()
+routerPublish routeMap publishQueue = do
   msg <- Q.recv publishQueue
   _ <- case findRoutes routeMap msg of
     [] -> return ()
@@ -34,59 +34,42 @@ routePub routeMap publishQueue = do
     route :: String -> String -> PublishQueue -> STM ()
     route topic message routeQueue = Q.send routeQueue (Publish topic message)
 
-
-router :: RouteMap -> PublishQueue -> IO ()
+router :: RouteMap -> RoutePublishQueue -> IO ()
 router routeMap pubQueue = do
-  print ("Start router")
-  _ <- atomically (routePub routeMap pubQueue)
-  print ("Got pub")
+  _ <- atomically (routerPublish routeMap pubQueue)
   router routeMap pubQueue
-  print("Routed")
 
-
--- |
---  Process SubMessage
---
-resolveSubRequest :: Request -> RouteMap -> RouteMap
-resolveSubRequest AddRouteRequest{..} (RouteMap routeMap) = RouteMap $ Map.insertWith (++) topic [queue] routeMap
-resolveSubRequest DropRouteRequest{..} (RouteMap routeMap) = RouteMap $ Map.mapMaybe (maybeList . List.filter (/=queue)) routeMap
-
--- |
---  routerManager is responsible for maintaining a route map and the router thread
---  It takes one argument, of type 'Int'.
-routerManager :: RouteMap -> RequestQueue -> PublishQueue -> IO ()
-routerManager routeMap alterRouteQueue pubQueue = do
-  print ("Start routerManager")
+routeManager :: RouteMap -> AlterRouteQueue -> RoutePublishQueue -> IO ()
+routeManager routeMap alterRouteQueue pubQueue = do
   print (Map.keys (coerce routeMap :: Map String [PublishQueue]))
   routerThreadId <- forkIO $ router routeMap pubQueue
   subRequest <- atomically $ Q.recv alterRouteQueue
   killThread routerThreadId
-  print("Alter route received")
-  routerManager (resolveSubRequest subRequest routeMap) alterRouteQueue pubQueue
+  routeManager (processRequest subRequest) alterRouteQueue pubQueue
+  where
+    processRequest :: AlterRoute -> RouteMap
+    processRequest AddRoute {..} = RouteMap $ Map.insertWith (++) topic [queue] (coerce routeMap)
+    processRequest DropRoute {..} = RouteMap $ Map.mapMaybe (maybeList . List.filter (/= queue)) (coerce routeMap)
 
-test :: RequestQueue -> PublishQueue -> IO ()
+test :: AlterRouteQueue -> RoutePublishQueue -> IO ()
 test alterRouteQueue publishQueue = do
   route <- atomically $ PublishQueue <$> newTBQueue 1000
-  _ <- atomically $ Q.send alterRouteQueue (AddRouteRequest "test" route)
+  _ <- atomically $ Q.send alterRouteQueue (AddRoute "test" route)
   threadDelay 100
   _ <- atomically $ Q.send publishQueue (Publish "test" "Hello world")
-  result <- atomically $ Q.recv route
-  print $ Publish.message result
-  _ <- atomically $ Q.send alterRouteQueue (AddRouteRequest "test/+/kikki" route)
+  _ <- atomically $ Q.recv route :: IO Publish
+  _ <- atomically $ Q.send alterRouteQueue (AddRoute "test/+/kikki" route)
   threadDelay 100
   _ <- atomically $ Q.send publishQueue (Publish "test/foo/kikki" "Hello kikki")
-  print("Waiting for response vvv")
-  result <- atomically $ Q.recv route
-  print("Got response")
-  print $ Publish.message result
-  _ <- atomically $ Q.send alterRouteQueue (DropRouteRequest route)
+  _ <- atomically $ Q.recv route :: IO Publish
+  _ <- atomically $ Q.send alterRouteQueue (DropRoute route)
   return ()
 
 main :: IO ()
 main = do
-  alterRouteQueue <- atomically $ RequestQueue <$> newTBQueue 1000
-  publishQueue <- atomically $ PublishQueue <$> newTBQueue 1000
-  _ <- forkIO $ test alterRouteQueue publishQueue
-  routerManager (RouteMap Map.empty) alterRouteQueue publishQueue
+  alterRoute <- atomically $ AlterRouteQueue <$> newTBQueue 1000
+  routePublish <- atomically $ RoutePublishQueue <$> newTBQueue 1000
+  --_ <- forkIO $ test alterRouteQueue publishQueue
+  _ <- forkIO $ routeManager (RouteMap Map.empty) alterRoute routePublish
+  _ <- runTCPServer Nothing "48350" alterRoute routePublish
   return ()
-

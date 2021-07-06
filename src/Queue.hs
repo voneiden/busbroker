@@ -1,6 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 
-module Queues.Queue where
+module Queue where
 
 import Control.Concurrent.STM (STM)
 

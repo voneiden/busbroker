@@ -1,11 +1,9 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
-
 module RouteMap where
 
 import Data.List.Split (splitOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Queues.Publish (Publish (Publish), PublishQueue, topic)
+import Publish (Publish (Publish), PublishQueue, topic)
 
 newtype RouteMap = RouteMap (Map String [PublishQueue])
 
@@ -27,3 +25,8 @@ findRoutes (RouteMap routeMap) Publish {topic = pubTopic} = do
   where
     f :: String -> [PublishQueue] -> Bool
     f subTopic _ = matchTopic subTopic pubTopic
+
+
+summa :: [Int] -> Int 
+summa [] = 0
+summa (x:xs) = x + summa xs 
