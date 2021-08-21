@@ -9,7 +9,6 @@ import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TBQueue (newTBQueue)
 import qualified Control.Exception as E
 import Control.Monad (forever, unless, void)
-import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Word (Word8)
 import Network.Socket (Socket)
@@ -33,10 +32,11 @@ runTCPServer host port alterRoute routePublish = Socket.withSocketsDo $ do
               }
       head <$> Socket.getAddrInfo (Just hints) host (Just port)
     open addr = E.bracketOnError (Socket.openSocket addr) Socket.close $ \socket -> do
+      putStrLn $ "Open add" ++ show addr
       Socket.setSocketOption socket Socket.ReuseAddr 1
       Socket.withFdSocket socket Socket.setCloseOnExecIfNeeded
       Socket.bind socket $ Socket.addrAddress addr
-      Socket.listen socket 1024
+      Socket.listen socket 5
       return socket
     loop sock = forever $
       E.bracketOnError (Socket.accept sock) (Socket.close . fst) $
@@ -60,7 +60,7 @@ connectionManager socket alterRoute routePublish = do
     loop publish = do
       msg <- BS.recv socket 1024
       unless (BS.null msg) $ do
-        handleRequest (BS.uncons msg) alterRoute routePublish publish
+        validateRequest (BS.uncons msg) alterRoute routePublish publish
         BS.sendAll socket "ok"
         loop publish
 
@@ -70,15 +70,25 @@ connectionManager socket alterRoute routePublish = do
       BS.sendAll socket (BSU.fromString $ Publish.message msg)
       relay publish
 
+pattern CmdAddRoute :: (Eq a, Num a) => a
 pattern CmdAddRoute = 33
 
+pattern CmdDropRoute :: (Eq a, Num a) => a
 pattern CmdDropRoute = 34
 
+pattern CmdRoutePublish :: (Eq a, Num a) => a
 pattern CmdRoutePublish = 35
 
-handleRequest :: Maybe (Word8, ByteString) -> AlterRouteQueue -> RoutePublishQueue -> PublishQueue -> IO ()
-handleRequest Nothing _ _ _ = return ()
-handleRequest (Just (CmdAddRoute, _payload)) alterRoute _ publish = atomically $ Q.send alterRoute (AddRoute "test" publish)
-handleRequest (Just (CmdDropRoute, _payload)) alterRoute _ publish = atomically $ Q.send alterRoute (DropRoute publish)
-handleRequest (Just (CmdRoutePublish, _payload)) _ routePublish _ = atomically $ Q.send routePublish (Publish "test" "foo")
-handleRequest (Just (_, _)) _ _ _ = putStrLn "Unknown request"
+validateRequest :: Maybe (Word8, ByteString) -> AlterRouteQueue -> RoutePublishQueue -> PublishQueue -> IO ()
+validateRequest Nothing _ _ _ = return ()
+validateRequest (Just (command, _payload)) alterRoute routePublish publish | payloadLength > 0 = handleRequest command _payload alterRoute routePublish publish
+                                                                           | otherwise = putStrLn "Bad request (payload length)"
+  where payloadLength = BS.length _payload
+
+handleRequest :: Word8 -> ByteString -> AlterRouteQueue -> RoutePublishQueue -> PublishQueue -> IO ()
+handleRequest CmdAddRoute _payload alterRoute _ publish = do
+  putStrLn $ "Add route: " ++ BSU.toString _payload
+  atomically $ Q.send alterRoute (AddRoute (BSU.toString _payload) publish)
+handleRequest CmdDropRoute _payload alterRoute _ publish = atomically $ Q.send alterRoute (DropRoute publish)
+handleRequest CmdRoutePublish _payload _ routePublish _ = atomically $ Q.send routePublish (Publish "test" "foo") -- TODO parse publish
+handleRequest _ _ _ _ _ = putStrLn "Unknown request"

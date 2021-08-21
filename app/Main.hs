@@ -69,7 +69,7 @@ main :: IO ()
 main = do
   alterRoute <- atomically $ AlterRouteQueue <$> newTBQueue 1000
   routePublish <- atomically $ RoutePublishQueue <$> newTBQueue 1000
-  --_ <- forkIO $ test alterRouteQueue publishQueue
+  --_ <- forkIO $ test alterRoute routePublish
   _ <- forkIO $ routeManager (RouteMap Map.empty) alterRoute routePublish
-  _ <- runTCPServer Nothing "48350" alterRoute routePublish
+  _ <- runTCPServer Nothing "42069" alterRoute routePublish
   return ()
