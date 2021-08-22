@@ -15,9 +15,11 @@ import Network.Socket (Socket)
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as BS (recv, sendAll)
 import Publish (Publish (Publish), PublishQueue (PublishQueue), RoutePublishQueue)
-import qualified Publish (Publish (message))
+import qualified Publish (Publish (topic, message))
 import qualified Queue as Q
 import Data.ByteString.UTF8 as BSU
+
+-- TOOD use https://hackage.haskell.org/package/network-simple/docs/Network-Simple-TCP.html ?
 
 runTCPServer :: Maybe Socket.HostName -> Socket.ServiceName -> AlterRouteQueue -> RoutePublishQueue -> IO a
 runTCPServer host port alterRoute routePublish = Socket.withSocketsDo $ do
@@ -60,24 +62,34 @@ connectionManager socket alterRoute routePublish = do
     loop publish = do
       msg <- BS.recv socket 1024
       unless (BS.null msg) $ do
-        validateRequest (BS.uncons msg) alterRoute routePublish publish
+        validateRequest (BS.uncons $ stripTrailingNull msg) alterRoute routePublish publish
         BS.sendAll socket "ok"
         loop publish
 
     relay :: PublishQueue -> IO ()
     relay publish = do
       msg <- atomically $ Q.recv publish
-      BS.sendAll socket (BSU.fromString $ Publish.message msg)
+      BS.sendAll socket (BSU.fromString $ Publish.topic msg ++ "|" ++ Publish.message msg ++ "\0")
       relay publish
 
 pattern CmdAddRoute :: (Eq a, Num a) => a
-pattern CmdAddRoute = 33
+pattern CmdAddRoute = 43 -- plus
 
 pattern CmdDropRoute :: (Eq a, Num a) => a
-pattern CmdDropRoute = 34
+pattern CmdDropRoute = 45 -- minus
 
 pattern CmdRoutePublish :: (Eq a, Num a) => a
-pattern CmdRoutePublish = 35
+pattern CmdRoutePublish = 64 -- @
+
+
+stripTrailingNull' :: ByteString -> Maybe (Word8, ByteString) -> ByteString
+stripTrailingNull' _ (Just (0, restReversed)) = BS.reverse restReversed
+stripTrailingNull' bs _ = bs
+
+stripTrailingNull :: ByteString -> ByteString
+stripTrailingNull bs = stripTrailingNull' bs (BS.uncons $ BS.reverse bs)
+
+
 
 validateRequest :: Maybe (Word8, ByteString) -> AlterRouteQueue -> RoutePublishQueue -> PublishQueue -> IO ()
 validateRequest Nothing _ _ _ = return ()
