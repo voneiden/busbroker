@@ -20,6 +20,11 @@ import RouterTypes-- (Message (Message), RequestQueue (RequestQueue), Response (
 
 -- TOOD use https://hackage.haskell.org/package/network-simple/docs/Network-Simple-TCP.html ?
 
+closeConnection :: RequestQueue -> ResponseQueue -> Socket -> b -> IO ()
+closeConnection requestQueue responseQueue connection _ = do
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (UnsubAllRequest responseQueue)
+  Socket.gracefulClose connection 5000
+
 runTCPServer :: Maybe Socket.HostName -> Socket.ServiceName -> RequestQueue -> IO a
 runTCPServer host port requestQueue = Socket.withSocketsDo $ do
   addr <- resolve
@@ -40,14 +45,16 @@ runTCPServer host port requestQueue = Socket.withSocketsDo $ do
       Socket.listen socket 5
       return socket
     loop sock = forever $
+      -- TODO close should lead to unsub
       E.bracketOnError (Socket.accept sock) (Socket.close . fst) $
-        \(connection, _peer) ->
+        \(connection, _peer) -> do
+          responseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
           void $
             -- 'forkFinally' alone is unlikely to fail thus leaking @conn@,
             -- but 'E.bracketOnError' above will be necessary if some
             -- non-atomic setups (e.g. spawning a subprocess to handle
             -- @conn@) before proper cleanup of @conn@ is your case
-            forkFinally (connectionManager connection requestQueue) (const $ Socket.gracefulClose connection 5000)
+            forkFinally (connectionManager connection requestQueue responseQueue) (closeConnection requestQueue responseQueue connection)
 
 receiveByte :: Socket -> IO [Word8]
 receiveByte socket = do
@@ -76,9 +83,8 @@ sendResponse :: Socket -> Response -> IO ()
 sendResponse socket (PubResponse (Topic topic) (Message message)) =
   SBS.sendAll socket (BSU.fromString $ topic ++ "|" ++ message ++ "\0")
 
-connectionManager :: Socket -> RequestQueue -> IO ()
-connectionManager socket requestQueue = do
-  responseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
+connectionManager :: Socket -> RequestQueue -> ResponseQueue -> IO ()
+connectionManager socket requestQueue responseQueue = do
   _ <- forkIO (deliverToClient responseQueue)
   receiveFromClient responseQueue
   where
