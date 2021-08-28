@@ -12,6 +12,7 @@ Data arrives from socket
 
 
 ```plantuml
+@startuml
 package IO {
     [Main]
     package "IO Net" {
@@ -28,9 +29,6 @@ package IO {
     }
 }
 
-package Pure {
-}
-
 [Client] ..> [Router Manager] : SUB
 [Client] ..> [Router] : PUB
 [Router] ..> [ClientRoute] : PUB
@@ -38,5 +36,34 @@ package Pure {
 [ClientRoute] .up.> [Socket] : SEND
 [Main] -> [Server]
 [Main] -> [Router Manager]
+@enduml
+```
+
+
+Consider a simpler v2
+
+* RequestQueue is derived in main, provided to sockets, handled by router
+* Sockets create their own ResponseQueue and provide it to the router when subscribing
+
+```plantuml
+@startuml
+[Main] -down-> [TCPServer] : fork
+[Main] -down-> [Router]
+[TCPServer]
+interface accept
+[TCPServer] -> [accept]
+[accept] -> [Socket1]
+[accept] -> [Socket2]
+interface RequestQueue
+[Socket1] -down-> [RequestQueue]
+[Socket2] -up-> [RequestQueue]
+[RequestQueue] -> [Router]
+
+interface Socket1ResponseQueue
+interface Socket2ResponseQueue
+[Router] -up-> [Socket1ResponseQueue]
+[Router] -down-> [Socket2ResponseQueue]
+[Socket1] <- [Socket1ResponseQueue]
+[Socket2] <- [Socket2ResponseQueue]
 @enduml
 ```

@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 7703d342939f336227ef6fe433fa1672e5427ba80ba2027aa36f276ebd03d89b
+-- hash: e564cb6d092d63870d115e955bfbfb979d157bbf5eb844269eca46974a32ffa5
 
 name:           busmaster2000
 version:        0.1.0.0
@@ -25,10 +25,9 @@ source-repository head
 
 library
   exposed-modules:
-      AlterRoute
-      Publish
-      Queue
-      RouteMap
+      Net
+      Router
+      RouterTypes
   other-modules:
       Paths_busmaster2000
   hs-source-dirs:
@@ -48,7 +47,6 @@ library
 executable busmaster2000-exe
   main-is: Main.hs
   other-modules:
-      Net
       Paths_busmaster2000
   hs-source-dirs:
       app
