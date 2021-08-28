@@ -13,11 +13,12 @@ import qualified Data.ByteString as BS
 import Data.Word (Word8)
 import Network.Socket (Socket)
 import qualified Network.Socket as Socket
-import qualified Network.Socket.ByteString as BS (recv, sendAll)
+import qualified Network.Socket.ByteString as SBS (recv, sendAll)
 import Publish (Publish (Publish), PublishQueue (PublishQueue), RoutePublishQueue)
 import qualified Publish (Publish (topic, message))
 import qualified Queue as Q
-import Data.ByteString.UTF8 as BSU
+import qualified Data.ByteString.UTF8 as BSU
+import Data.ByteString.UTF8 (ByteString)
 
 -- TOOD use https://hackage.haskell.org/package/network-simple/docs/Network-Simple-TCP.html ?
 
@@ -50,6 +51,40 @@ runTCPServer host port alterRoute routePublish = Socket.withSocketsDo $ do
             -- @conn@) before proper cleanup of @conn@ is your case
             forkFinally (connectionManager connection alterRoute routePublish) (const $ Socket.gracefulClose connection 5000)
 
+
+receiveByte :: Socket -> IO [Word8]
+receiveByte socket = do
+  byte <- SBS.recv socket 1
+  if BS.null byte then
+    return []
+  else
+    return [BS.last byte]
+
+receiveMessage' :: Socket -> [Word8] -> IO [Word8]
+receiveMessage' _ [] = return []
+receiveMessage' _ [0] = return [0]
+receiveMessage' socket lastByte = do
+  nextByte <- receiveByte socket
+  nextData <- receiveMessage' socket nextByte
+  if null nextData then
+    return []
+  else
+    return $ lastByte ++ nextData
+
+receiveMessage :: Socket -> IO ByteString
+receiveMessage socket = do
+  firstByte <- receiveByte socket
+  message <- receiveMessage' socket firstByte
+  return $ BS.pack message
+
+
+--receiveMessage' :: Socket -> IO ByteString -> IO ByteString
+--receiveMessage' socket lastByte =
+
+--receiveMessage :: Socket -> IO ByteString
+--receiveMessage socket =
+
+
 connectionManager :: Socket -> AlterRouteQueue -> RoutePublishQueue -> IO ()
 connectionManager socket alterRoute routePublish = do
   publish <- atomically $ PublishQueue <$> newTBQueue 1000
@@ -60,16 +95,16 @@ connectionManager socket alterRoute routePublish = do
   where
     loop :: PublishQueue -> IO ()
     loop publish = do
-      msg <- BS.recv socket 1024
+      msg <- receiveMessage socket
       unless (BS.null msg) $ do
         validateRequest (BS.uncons $ stripTrailingNull msg) alterRoute routePublish publish
-        BS.sendAll socket "ok"
+        --BS.sendAll socket "0"
         loop publish
 
     relay :: PublishQueue -> IO ()
     relay publish = do
       msg <- atomically $ Q.recv publish
-      BS.sendAll socket (BSU.fromString $ Publish.topic msg ++ "|" ++ Publish.message msg ++ "\0")
+      SBS.sendAll socket (BSU.fromString $ Publish.topic msg ++ "|" ++ Publish.message msg ++ "\0")
       relay publish
 
 pattern CmdAddRoute :: (Eq a, Num a) => a
@@ -97,10 +132,19 @@ validateRequest (Just (command, _payload)) alterRoute routePublish publish | pay
                                                                            | otherwise = putStrLn "Bad request (payload length)"
   where payloadLength = BS.length _payload
 
+handleRoutePublish :: RoutePublishQueue -> [String] -> IO()
+handleRoutePublish routePublishQueue [topic, message] = atomically $ Q.send routePublishQueue (Publish topic message)
+handleRoutePublish _ _ = do
+  putStrLn "Invalid data in publish"
+  return ()
 handleRequest :: Word8 -> ByteString -> AlterRouteQueue -> RoutePublishQueue -> PublishQueue -> IO ()
 handleRequest CmdAddRoute _payload alterRoute _ publish = do
   putStrLn $ "Add route: " ++ BSU.toString _payload
   atomically $ Q.send alterRoute (AddRoute (BSU.toString _payload) publish)
-handleRequest CmdDropRoute _payload alterRoute _ publish = atomically $ Q.send alterRoute (DropRoute publish)
-handleRequest CmdRoutePublish _payload _ routePublish _ = atomically $ Q.send routePublish (Publish "test" "foo") -- TODO parse publish
-handleRequest _ _ _ _ _ = putStrLn "Unknown request"
+handleRequest CmdDropRoute _payload alterRoute _ publish = do
+  putStrLn $ "Drop route: " ++ BSU.toString _payload
+  atomically $ Q.send alterRoute (DropRoute publish)
+handleRequest CmdRoutePublish _payload _ routePublish _ = do
+  putStrLn $ "Publish message: " ++ BSU.toString _payload
+  handleRoutePublish routePublish (map BSU.toString $ BS.split 124 _payload)
+handleRequest cmd _payload _ _ _ = putStrLn $ "Unknown request: " ++ show cmd ++ show _payload
