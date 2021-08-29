@@ -16,7 +16,7 @@ import Data.Word (Word8)
 import Network.Socket (Socket)
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as SBS (recv, sendAll)
-import RouterTypes-- (Message (Message), RequestQueue (RequestQueue), Response (PubResponse), ResponseQueue (ResponseQueue), Topic (Topic), Request (..))
+import RouterTypes
 
 -- TOOD use https://hackage.haskell.org/package/network-simple/docs/Network-Simple-TCP.html ?
 

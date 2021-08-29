@@ -1,14 +1,11 @@
 module Router (runRouter) where
 
-import Control.Concurrent.STM (STM, TBQueue, atomically, newTBQueue, readTBQueue, writeTBQueue)
+import Control.Concurrent.STM (STM, atomically, readTBQueue, writeTBQueue)
 import Data.Coerce (coerce)
 import qualified Data.List as List (filter)
 import Data.List.Split (splitOn)
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Net (runTCPServer)
 import RouterTypes
-
 
 matchTopic :: Topic -> Topic -> Bool
 matchTopic (Topic subTopic) (Topic pubTopic) = matchTopic' (splitOn "/" subTopic) (splitOn "/" pubTopic)
