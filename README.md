@@ -1,15 +1,5 @@
-# busmaster2000
-
-Client
-* Module
-    * Route
-    
-    
-Data arrives from socket 
--> transform
--> redeliver to interested parties
-
-
+Busbroker is a custom modification of [punybroker](https://github.com/voneiden/punybroker) 
+serving as the broker for a flight simulator build. 
 
 ```plantuml
 @startuml
@@ -65,5 +55,28 @@ interface Socket2ResponseQueue
 [Router] -down-> [Socket2ResponseQueue]
 [Socket1] <- [Socket1ResponseQueue]
 [Socket2] <- [Socket2ResponseQueue]
+@enduml
+```
+
+
+```plantuml
+@startuml
+package Stacktrix {
+[ModuleN] <-> [Gateway] : i2C
+[Gateway] <-> [W5500] : SPI
+
+
+}
+
+package "Router Server" {
+interface Sockets
+Sockets <-> [PubSub Routing] : STM
+[PubSub Routing] <-> [IO Mapping] : STM
+}
+
+W5500 <-right-> Sockets : TCP
+
+interface Simulator 
+Simulator <-up-> Sockets : TCP 
 @enduml
 ```

@@ -1,22 +1,15 @@
-name:                busmaster2000
+name:                busbroker
 version:             0.1.0.0
-github:              "Github username here/busmaster2000"
-license:             BSD3
-author:              "Author name here"
-maintainer:          "Author email here"
-copyright:           "2019 Author name here"
+github:              "voneiden/busbroker"
+license:             MIT
+author:              "Matti Eiden"
+maintainer:          "snaipperi@gmail.com"
+copyright:           "2020-2021 Matti Eiden"
 
 extra-source-files:
 - README.md
 
-# Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            App category here
-
-# To avoid duplicated efforts in documentation and dealing with the
-# complications of embedding Haddock markup inside cabal files, it is
-# common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/Github username here/busmaster2000#readme>
+description:         Please see the README on GitHub at <https://github.com/voneiden/busmaster#readme>
 
 dependencies:
 - base >= 4.9 && < 5
@@ -43,7 +36,7 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - busmaster2000
+    - busbroker
 
 tests:
   busmaster2000-test:
@@ -54,4 +47,4 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - busmaster2000
+    - busbroker
