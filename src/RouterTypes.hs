@@ -4,14 +4,13 @@ import Control.Concurrent.STM (TBQueue)
 import Data.Map.Strict (Map)
 import Data.ByteString (ByteString)
 
--- TODO message should be bytestring
 newtype Message = Message ByteString
 
 newtype Topic = Topic String deriving (Eq, Ord)
 
-data Request = SubRequest Topic ResponseQueue 
-             | UnsubRequest Topic ResponseQueue 
-             | PubRequest Topic Message 
+data Request = SubRequest Topic ResponseQueue
+             | UnsubRequest Topic ResponseQueue
+             | PubRequest Topic Message
              | UnsubAllRequest ResponseQueue
 
 data Response = PubResponse Topic Message
