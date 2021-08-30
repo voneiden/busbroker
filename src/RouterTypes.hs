@@ -2,9 +2,10 @@ module RouterTypes where
 
 import Control.Concurrent.STM (TBQueue)
 import Data.Map.Strict (Map)
+import Data.ByteString (ByteString)
 
 -- TODO message should be bytestring
-newtype Message = Message String
+newtype Message = Message ByteString
 
 newtype Topic = Topic String deriving (Eq, Ord)
 
