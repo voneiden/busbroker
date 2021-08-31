@@ -21,6 +21,7 @@ dependencies:
 - bytestring
 - utf8-string
 - tomland
+- parsec
 
 
 library:
