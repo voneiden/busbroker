@@ -22,6 +22,11 @@ dependencies:
 - utf8-string
 - tomland
 - parsec
+- timeit
+- scotty
+- aeson
+- text
+- time
 
 
 library:

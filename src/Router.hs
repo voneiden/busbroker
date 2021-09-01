@@ -6,9 +6,13 @@ import qualified Data.List as List (filter)
 import Data.List.Split (splitOn)
 import qualified Data.Map.Strict as Map
 import RouterTypes
+import System.TimeIt (timeItNamed)
+import Util (epoch)
+import Network.Socket (SockAddr)
+import Stats
 
 matchTopic :: Topic -> Topic -> Bool
-matchTopic (Topic subTopic) (Topic pubTopic) = matchTopic' (splitOn "/" subTopic) (splitOn "/" pubTopic)
+matchTopic (Topic subTopic) (Topic pubTopic) = matchTopic' subTopic pubTopic
   where
     matchTopic' :: [String] -> [String] -> Bool
     matchTopic' ("#" : _) _ = True -- Multi-level wildcard
@@ -24,6 +28,8 @@ findRoutes (RouteMap routeMap) topic = do
     f :: Topic -> [ResponseQueue] -> Bool
     f subTopic _ = matchTopic subTopic topic
 
+findRoutesIO :: RouteMap -> Topic -> IO [ResponseQueue]
+findRoutesIO routeMap topic = return $ findRoutes routeMap topic
 --
 sendResponses :: Response -> [ResponseQueue] -> STM ()
 sendResponses _ [] = return ()
@@ -38,22 +44,40 @@ unsubMapper unsubTopic unsubResponseQueue topic responseQueues
   | unsubTopic == topic = maybeList $ List.filter (/= unsubResponseQueue) responseQueues
   | otherwise = Just responseQueues
 
-handleRequest :: Request -> RouteMap -> IO RouteMap
-handleRequest (SubRequest subTopic subResponseQueue) (RouteMap routeMap) = return $ RouteMap $ Map.insertWith (++) subTopic [subResponseQueue] routeMap
-handleRequest (UnsubRequest unsubTopic unsubResponseQueue) (RouteMap routeMap) = return $ RouteMap $ Map.mapMaybeWithKey (unsubMapper unsubTopic unsubResponseQueue) routeMap
-handleRequest (UnsubAllRequest unsubAllResponseQueue) (RouteMap routeMap) = return $ RouteMap $ Map.mapMaybe (maybeList . List.filter (/= unsubAllResponseQueue)) routeMap
-handleRequest (PubRequest topic message) routeMap = do
-  _ <- atomically $ sendResponses (PubResponse topic message) (findRoutes routeMap topic)
-  return routeMap
 
-router :: RequestQueue -> RouteMap -> IO ()
-router (RequestQueue requestQueue) routeMap = do
-  putStrLn "Router waiting for messages"
+handleRequest :: Request -> RouteMap -> QueueStatisticsMap -> IO (RouteMap, QueueStatisticsMap)
+handleRequest (SubRequest subTopic subResponseQueue) (RouteMap routeMap) queueStatisticsMap = do
+  return (RouteMap $ Map.insertWith (++) subTopic [subResponseQueue] routeMap, queueStatisticsMap)
+
+handleRequest (UnsubRequest unsubTopic unsubResponseQueue) (RouteMap routeMap) queueStatisticsMap = do
+  return (RouteMap $ Map.mapMaybeWithKey (unsubMapper unsubTopic unsubResponseQueue) routeMap, queueStatisticsMap)
+
+handleRequest (UnsubAllRequest unsubAllResponseQueue) (RouteMap routeMap) queueStatisticsMap = do
+  return (RouteMap $ Map.mapMaybe (maybeList . List.filter (/= unsubAllResponseQueue)) routeMap, queueStatisticsMap)
+
+handleRequest (PubRequest addr topic message) routeMap queueStatisticsMap = do
+  queueStatisticsMap' <- recordStatsOut addr queueStatisticsMap
+  _ <- atomically $ sendResponses (PubResponse topic message) $ findRoutes routeMap topic
+  --putStrLn $ "Delivered to " ++ show (length routes) ++ " queues"
+  return (routeMap, queueStatisticsMap')
+
+handleRequest (IdentifyRequest addr name) routeMap queueStatisticsMap = do
+  queueStatisticsMap' <- recordStatsName addr queueStatisticsMap name
+  return (routeMap, queueStatisticsMap')
+  
+handleRequest (PongRequest addr pong) routeMap queueStatisticsMap = do
+  queueStatisticsMap' <- recordStatsPing addr queueStatisticsMap pong
+  return (routeMap, queueStatisticsMap')
+
+router :: RequestQueue -> RouteMap -> QueueStatisticsMap -> IO ()
+router (RequestQueue requestQueue) routeMap queueStatisticsMap = do
+  --putStrLn "Router waiting for messages"
   request <- atomically $ readTBQueue requestQueue
-  newRouteMap <- handleRequest request routeMap
-  putStrLn "Processing done"
-  router (RequestQueue requestQueue) newRouteMap
+  (routeMap', queueStatisticsMap') <- handleRequest request routeMap queueStatisticsMap
+  print queueStatisticsMap'
+  --putStrLn "Processing done"
+  router (RequestQueue requestQueue) routeMap' queueStatisticsMap'
 
 runRouter :: RequestQueue -> IO ()
 runRouter requestQueue =
-  router requestQueue (RouteMap Map.empty)
+  router requestQueue (RouteMap Map.empty) (QueueStatisticsMap Map.empty)

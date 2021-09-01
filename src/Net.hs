@@ -12,10 +12,12 @@ import Data.ByteString.UTF8 (ByteString)
 import qualified Data.ByteString.UTF8 as BSU
 import Data.Char (chr)
 import Data.Coerce (coerce)
-import Network.Socket (Socket)
+import Network.Socket (Socket, getPeerName, SockAddr)
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as SBS (recv, sendAll)
 import RouterTypes
+import Data.List.Split (splitOn)
+import Data.List (intercalate)
 
 closeConnection :: RequestQueue -> ResponseQueue -> Socket -> b -> IO ()
 closeConnection requestQueue responseQueue connection _ = do
@@ -62,7 +64,7 @@ toLengthPrefixedFrame bs
 
 sendResponse :: Socket -> Response -> IO ()
 sendResponse socket (PubResponse (Topic topic) (Message message)) =
-  case toLengthPrefixedFrame (BSU.fromString topic) of
+  case toLengthPrefixedFrame (BSU.fromString $ intercalate "/" topic) of
     Just bsTopic ->
       case toLengthPrefixedFrame message of
         Just bsMessage ->
@@ -74,11 +76,12 @@ sendResponse socket (PubResponse (Topic topic) (Message message)) =
 
 runQueueHandlers :: Socket -> RequestQueue -> ResponseQueue -> IO ()
 runQueueHandlers socket requestQueue responseQueue = do
-  _ <- forkIO (forever $ deliverMessage socket responseQueue)
-  forever $ receiveMessage socket requestQueue responseQueue
+  addr <- getPeerName socket
+  _ <- forkIO (forever $ deliverMessage socket addr responseQueue)
+  forever $ receiveMessage socket addr requestQueue responseQueue
 
-deliverMessage :: Socket -> ResponseQueue -> IO ()
-deliverMessage socket responseQueue = do
+deliverMessage :: Socket -> SockAddr -> ResponseQueue -> IO ()
+deliverMessage socket addr responseQueue = do
   response <- atomically $ readTBQueue (coerce responseQueue)
   sendResponse socket response
 
@@ -107,20 +110,20 @@ readLengthPrefixedFrame socket = do
   n <- recvNBytes socket 1
   recvNBytes socket (fromIntegral $ BS.head n)
 
-receiveMessage :: Socket -> RequestQueue -> ResponseQueue -> IO ()
-receiveMessage socket requestQueue responseQueue = do
+receiveMessage :: Socket -> SockAddr -> RequestQueue -> ResponseQueue -> IO ()
+receiveMessage socket addr requestQueue responseQueue = do
   command <- recvNBytes socket 1
-  handleRequest socket (chr . fromEnum $ BS.head command) requestQueue responseQueue
+  handleRequest socket addr (chr . fromEnum $ BS.head command) requestQueue responseQueue
 
-handleRequest :: Socket -> Char -> RequestQueue -> ResponseQueue -> IO ()
-handleRequest socket '+' requestQueue responseQueue = do
+handleRequest :: Socket -> SockAddr -> Char -> RequestQueue -> ResponseQueue -> IO ()
+handleRequest socket addr '+' requestQueue responseQueue = do
   topicPattern <- readLengthPrefixedFrame socket
-  atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (BSU.toString topicPattern)) responseQueue)
-handleRequest socket '-' requestQueue responseQueue = do
+  atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" $ BSU.toString topicPattern)) responseQueue)
+handleRequest socket addr '-' requestQueue responseQueue = do
   topicPattern <- readLengthPrefixedFrame socket
-  atomically $ writeTBQueue (coerce requestQueue) (UnsubRequest (Topic (BSU.toString topicPattern)) responseQueue)
-handleRequest socket '@' requestQueue _ = do
+  atomically $ writeTBQueue (coerce requestQueue) (UnsubRequest (Topic (splitOn "/" $ BSU.toString topicPattern)) responseQueue)
+handleRequest socket addr '@' requestQueue _ = do
   topic <- readLengthPrefixedFrame socket
   message <- readLengthPrefixedFrame socket
-  atomically $ writeTBQueue (coerce requestQueue) (PubRequest (Topic (BSU.toString topic)) (Message message))
-handleRequest _ _ _ _ = ioError $ userError "Unknown command"
+  atomically $ writeTBQueue (coerce requestQueue) (PubRequest addr (Topic (splitOn "/" $ BSU.toString topic)) (Message message))
+handleRequest _ _ _ _ _ = ioError $ userError "Unknown command"
