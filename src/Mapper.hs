@@ -3,7 +3,7 @@ module Mapper (runMapper) where
 -- Mapper.hs does STM queue mapping between various outputs and inputs
 -- In simulator terms, it maps data from stacktrix to the simulation data source and vice versa
 import Control.Applicative ((<*))
-import Control.Concurrent.STM (atomically, newTBQueue, readTBQueue, writeTBQueue)
+import Control.Concurrent.STM (atomically, newTBQueue, readTBQueue, writeTBQueue, TBQueue)
 import Control.Monad (forever)
 import Data.Char (chr)
 import Data.Coerce (coerce)
@@ -160,11 +160,21 @@ setupMapping requestQueue (Mapping (Output output) (Input input)) = do
   _ <- forkIO $ forever $ runMapping requestQueue responseQueue (Mapping (Output output) (Input input))
   return ()
 
---
+respondPing :: RequestQueue -> ResponseQueue -> IO ()
+respondPing pongQueue pingQueue = do
+  ping <- atomically $ readTBQueue (coerce pingQueue) 
+  case ping of 
+    PingResponse t ->
+      atomically $ writeTBQueue (coerce pongQueue) (PongRequest sockAddr t)   
+    _ -> 
+      return ()
+   
 
 runMapper :: RequestQueue -> IO ()
 runMapper requestQueue = do
-  _ <- atomically $ writeTBQueue (coerce requestQueue) (IdentifyRequest sockAddr "IO Mapper")
+  pingResponseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (IdentifyRequest sockAddr (Just pingResponseQueue))
+  _ <- forkIO $ forever $ respondPing requestQueue pingResponseQueue 
   mappings <- setup
   putStrLn $ "Loaded " ++ show (length mappings) ++ " mappings"
   mapM_ (setupMapping requestQueue) mappings

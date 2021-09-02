@@ -4,11 +4,12 @@ import qualified Data.Map as Map
 import Network.Socket (SockAddr)
 import RouterTypes
 import Util (epoch)
+import Data.Coerce (coerce)
 
-defaultRecord :: IO QueueStatistics
-defaultRecord = do
+defaultRecord :: SockAddr -> IO QueueStatistics
+defaultRecord addr = do
   t <- epoch
-  return $ QueueStatistics "Unidentified" 999 t 0 0
+  return $ QueueStatistics addr 999 t 0 0
 
 getRecord :: SockAddr -> QueueStatisticsMap -> IO QueueStatistics
 getRecord addr (QueueStatisticsMap stats) = do
@@ -16,25 +17,28 @@ getRecord addr (QueueStatisticsMap stats) = do
     Just record ->
       return record
     Nothing -> do
-      defaultRecord
+      defaultRecord addr
+
+recordIdentify :: SockAddr -> QueueStatisticsMap -> IO QueueStatisticsMap
+recordIdentify addr stats = do
+  record <- getRecord addr stats
+  return $ coerce $ Map.insert addr record $ coerce stats
 
 recordStatsOut :: SockAddr -> QueueStatisticsMap -> IO QueueStatisticsMap
-recordStatsOut addr (QueueStatisticsMap stats) = do
-  record <- getRecord addr (QueueStatisticsMap stats)
-  return $ QueueStatisticsMap $ Map.insert addr record {queueMessagesOut = queueMessagesOut record + 1} stats
+recordStatsOut addr stats = do
+  record <- getRecord addr stats
+  return $ coerce $ Map.insert addr record {queueMessagesOut = queueMessagesOut record + 1} $ coerce stats
 
 recordStatsIn :: SockAddr -> QueueStatisticsMap -> IO QueueStatisticsMap
-recordStatsIn addr (QueueStatisticsMap stats) = do
-  record <- getRecord addr (QueueStatisticsMap stats)
-  return $ QueueStatisticsMap $ Map.insert addr record {queueMessagesIn = queueMessagesIn record + 1} stats
-
-recordStatsName :: SockAddr -> QueueStatisticsMap -> String -> IO QueueStatisticsMap
-recordStatsName addr (QueueStatisticsMap stats) name = do
-  record <- getRecord addr (QueueStatisticsMap stats)
-  return $ QueueStatisticsMap $ Map.insert addr record {queueName = name} stats
+recordStatsIn addr stats = do
+  record <- getRecord addr stats
+  return $ coerce $ Map.insert addr record {queueMessagesIn = queueMessagesIn record + 1} $ coerce stats
 
 recordStatsPing :: SockAddr -> QueueStatisticsMap -> Integer -> IO QueueStatisticsMap
-recordStatsPing addr (QueueStatisticsMap stats) pong = do
-  now <- epoch 
-  record <- getRecord addr (QueueStatisticsMap stats)
-  return $ QueueStatisticsMap $ Map.insert addr record {queuePing = now - pong} stats
+recordStatsPing addr stats pong = do
+  now <- epoch
+  record <- getRecord addr stats
+  return $ coerce $ Map.insert addr record {queuePing = now - pong} $ coerce stats
+
+deleteStats :: SockAddr -> QueueStatisticsMap -> QueueStatisticsMap 
+deleteStats addr stats = QueueStatisticsMap $ Map.delete addr $ coerce stats  

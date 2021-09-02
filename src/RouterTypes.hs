@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveFunctor #-}
+
 module RouterTypes where
 
 import Control.Concurrent.STM (TBQueue)
@@ -16,11 +18,13 @@ data Request
   | UnsubRequest Topic ResponseQueue
   | PubRequest SockAddr Topic Message
   | UnsubAllRequest ResponseQueue
-  | IdentifyRequest SockAddr String
+  | IdentifyRequest SockAddr (Maybe ResponseQueue)
+  | PingAllRequest
   | PongRequest SockAddr Integer
+  | UnidentifyRequest SockAddr (Maybe ResponseQueue)
 
 -- Responses are processed by those who request
-data Response = PubResponse Topic Message | Ping Integer
+data Response = PubResponse Topic Message | PingResponse Integer
 
 newtype RequestQueue = RequestQueue (TBQueue Request)
 
@@ -29,7 +33,7 @@ newtype ResponseQueue = ResponseQueue (TBQueue Response) deriving (Eq)
 newtype RouteMap = RouteMap (Map Topic [ResponseQueue])
 
 data QueueStatistics = QueueStatistics
-  { queueName :: String,
+  { queueSockAddr :: SockAddr,
     queuePing :: Integer,
     queueCreated :: Integer,
     queueMessagesIn :: Integer,
@@ -38,3 +42,7 @@ data QueueStatistics = QueueStatistics
   deriving (Show)
 
 newtype QueueStatisticsMap = QueueStatisticsMap (Map SockAddr QueueStatistics) deriving (Show)
+newtype PingResponseQueues = PingResponseQueues [ResponseQueue]
+
+
+
