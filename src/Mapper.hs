@@ -35,7 +35,7 @@ newtype Output = Output String deriving (Eq, Show)
 
 newtype Input = Input String deriving (Eq, Show)
 
-data Endpoint = SXEndpoint String String | GenericEndpoint String
+newtype Endpoint = Endpoint String
 
 data Mapping = Mapping Output Input deriving (Eq, Show)
 
@@ -80,12 +80,12 @@ sxParser input = do
   sxId <- symbol "x/" *> integer
   busId <- symbol (io input) *> integer
   reg <- symbol "/" *> integer <* symbol "/"
-  return $ SXEndpoint ("sx/" ++ chrs sxId ++ io input ++ chrs busId ++ "/" ++ chrs reg ++ "/") ("sx/" ++ show sxId ++ io input ++ show busId ++ "/" ++ show reg ++ "/")
+  return $ Endpoint ("sx/" ++ show sxId ++ io input ++ show busId ++ "/" ++ show reg ++ "/")
 
 simParser :: Bool -> Parsec String () Endpoint
 simParser input = do
   simIdentifier <- symbol "im" *> symbol (io input) *> identifier <* symbol "/"
-  return $ GenericEndpoint ("sim" ++ io input ++ simIdentifier ++ "/")
+  return $ Endpoint ("sim" ++ io input ++ simIdentifier ++ "/")
 
 inputParser :: Parsec String () Endpoint
 inputParser = do
@@ -97,40 +97,41 @@ outputParser :: Parsec String () Endpoint
 outputParser = do
   sxParser False <|> simParser False
 
-myPairs :: Parsec String () [[Mapping]]
+myPairs :: Parsec String () [Mapping]
 myPairs = Parsec.many1 $ do
   output <- whiteSpace *> symbol "s" *> outputParser
   input <- reservedOp "->" *> symbol "s" *> inputParser <* whiteSpace
-  case output of
-    SXEndpoint output' debugOutput ->
-      case input of
-        SXEndpoint input' debugInput ->
-          return
-            [ Mapping (Output output') (Input input'),
-              Mapping (Output output') (Input debugOutput),
-              Mapping (Output debugInput) (Input input')
-            ]
-        GenericEndpoint input' ->
-          return
-            [ Mapping (Output output') (Input input'),
-              Mapping (Output output') (Input debugOutput)
-            ]
-    GenericEndpoint output' ->
-      case input of
-        SXEndpoint input' debug ->
-          return
-            [ Mapping (Output output') (Input input'),
-              Mapping (Output debug) (Input input')
-            ]
-        GenericEndpoint input' ->
-          return
-            [ Mapping (Output output') (Input input')
-            ]
+  return $ Mapping (coerce output) (coerce input)
+  --case output of
+  --  SXEndpoint output' debugOutput ->
+  --    case input of
+  --      SXEndpoint input' debugInput ->
+  --        return
+  --          [ Mapping (Output output') (Input input'),
+  --            Mapping (Output output') (Input debugOutput),
+  --            Mapping (Output debugInput) (Input input')
+  --          ]
+  --      GenericEndpoint input' ->
+  --        return
+  --          [ Mapping (Output output') (Input input'),
+  --            Mapping (Output output') (Input debugOutput)
+  --          ]
+  --  GenericEndpoint output' ->
+  --    case input of
+  --      SXEndpoint input' debug ->
+  --        return
+  --          [ Mapping (Output output') (Input input'),
+  --            Mapping (Output debug) (Input input')
+  --          ]
+  --      GenericEndpoint input' ->
+  --        return
+  --          [ Mapping (Output output') (Input input')
+  --          ]
 
 parseAll :: Parsec String () [Mapping]
 parseAll = do
-  mappings <- myPairs <* Parsec.eof
-  return $ concat mappings
+  myPairs <* Parsec.eof
+  
 
 setup :: IO [Mapping]
 setup = do
