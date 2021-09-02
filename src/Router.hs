@@ -2,7 +2,7 @@ module Router (runRouter) where
 
 import Control.Concurrent.STM (STM, atomically, readTBQueue, writeTBQueue)
 import Data.Coerce (coerce)
-import qualified Data.List as List (filter, delete)
+import qualified Data.List as List (filter, delete, map)
 import Data.List.Split (splitOn)
 import qualified Data.Map.Strict as Map
 import RouterTypes
@@ -11,7 +11,7 @@ import Util (epoch)
 import Network.Socket (SockAddr)
 import Stats
 import Control.Concurrent (threadDelay, forkIO)
-import Control.Monad (forever)
+import Control.Monad (forever, foldM)
 
 matchTopic :: Topic -> Topic -> Bool
 matchTopic (Topic subTopic) (Topic pubTopic) = matchTopic' subTopic pubTopic
@@ -23,14 +23,14 @@ matchTopic (Topic subTopic) (Topic pubTopic) = matchTopic' subTopic pubTopic
     matchTopic' [] [] = True -- Fully matched
     matchTopic' _ _ = False -- otherwise: mismatch
 
-findRoutes :: RouteMap -> Topic -> [ResponseQueue]
+findRoutes :: RouteMap -> Topic -> [(ResponseQueue, SockAddr)]
 findRoutes (RouteMap routeMap) topic = do
   concat $ Map.elems $ Map.filterWithKey f routeMap
   where
-    f :: Topic -> [ResponseQueue] -> Bool
+    f :: Topic -> [(ResponseQueue, SockAddr)] -> Bool
     f subTopic _ = matchTopic subTopic topic
 
-findRoutesIO :: RouteMap -> Topic -> IO [ResponseQueue]
+findRoutesIO :: RouteMap -> Topic -> IO [(ResponseQueue, SockAddr)]
 findRoutesIO routeMap topic = return $ findRoutes routeMap topic
 --
 sendResponses :: Response -> [ResponseQueue] -> STM ()
@@ -41,7 +41,7 @@ maybeList :: [a] -> Maybe [a]
 maybeList [] = Nothing
 maybeList x = Just x
 
-unsubMapper :: Topic -> ResponseQueue -> Topic -> [ResponseQueue] -> Maybe [ResponseQueue]
+unsubMapper :: Topic -> (ResponseQueue, SockAddr) -> Topic -> [(ResponseQueue, SockAddr)] -> Maybe [(ResponseQueue, SockAddr)]
 unsubMapper unsubTopic unsubResponseQueue topic responseQueues
   | unsubTopic == topic = maybeList $ List.filter (/= unsubResponseQueue) responseQueues
   | otherwise = Just responseQueues
@@ -58,9 +58,16 @@ handleRequest (UnsubAllRequest unsubAllResponseQueue) (RouteMap routeMap) queueS
 
 handleRequest (PubRequest addr topic message) routeMap queueStatisticsMap pings = do
   queueStatisticsMap' <- recordStatsOut addr queueStatisticsMap
-  _ <- atomically $ sendResponses (PubResponse topic message) $ findRoutes routeMap topic
+  let routeSockAddrs = findRoutes routeMap topic
+  let routes = List.map fst routeSockAddrs
+  let sockAddrs = List.map snd routeSockAddrs
+  -- TODO record stats
+  _ <- putStrLn $ show $ length routes
+  _ <- putStrLn $ show $ sockAddrs
+  queueStatisticsMap'' <- foldM (flip recordStatsIn) queueStatisticsMap' sockAddrs
+  _ <- atomically $ sendResponses (PubResponse topic message) routes
   --putStrLn $ "Delivered to " ++ show (length routes) ++ " queues"
-  return (routeMap, queueStatisticsMap', pings)
+  return (routeMap, queueStatisticsMap'', pings)
 
 handleRequest (IdentifyRequest addr maybeRequestQueue) routeMap queueStatisticsMap (PingResponseQueues pings) = do
   queueStatisticsMap' <- recordIdentify addr queueStatisticsMap
@@ -88,12 +95,16 @@ handleRequest PingAllRequest routeMap queueStatisticsMap pings = do
   mapM_ pingQueue (coerce pings :: [ResponseQueue])
   return (routeMap, queueStatisticsMap, pings)
 
+handleRequest (StatsRequest responseQueue) routeMap queueStatisticsMap pings = do
+  _ <- atomically $ writeTBQueue (coerce responseQueue) (StatsResponse $ Map.elems (coerce queueStatisticsMap))
+  return (routeMap, queueStatisticsMap, pings)
+
 router :: RequestQueue -> RouteMap -> QueueStatisticsMap -> PingResponseQueues -> IO ()
 router (RequestQueue requestQueue) routeMap stats pings = do
   --putStrLn "Router waiting for messages"
   request <- atomically $ readTBQueue requestQueue
   (routeMap', stats', pings') <- handleRequest request routeMap stats pings
-  print stats'
+  --print stats'
   --putStrLn "Processing done"
   router (RequestQueue requestQueue) routeMap' stats' pings'
 

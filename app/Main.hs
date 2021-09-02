@@ -13,7 +13,7 @@ main = do
   requestQueue <- atomically $ RequestQueue <$> newTBQueue 1000
   _ <- forkIO $ runRouter requestQueue
   _ <- forkIO $ runMapper requestQueue
-  _ <- forkIO runScotty
+  _ <- forkIO $ runScotty requestQueue
   _ <- runTCPServer Nothing "42069" requestQueue
   putStrLn "Done, good night."
   return ()

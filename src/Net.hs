@@ -21,7 +21,9 @@ import Data.List (intercalate)
 
 closeConnection :: RequestQueue -> ResponseQueue -> Socket -> b -> IO ()
 closeConnection requestQueue responseQueue connection _ = do
-  _ <- atomically $ writeTBQueue (coerce requestQueue) (UnsubAllRequest responseQueue)
+  -- todo this might crash?
+  addr <- getPeerName connection
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (UnsubAllRequest (responseQueue, addr))
   Socket.gracefulClose connection 5000
 
 runTCPServer :: Maybe Socket.HostName -> Socket.ServiceName -> RequestQueue -> IO a
@@ -53,6 +55,7 @@ runTCPServer host port requestQueue = Socket.withSocketsDo $ do
             -- but 'E.bracketOnError' above will be necessary if some
             -- non-atomic setups (e.g. spawning a subprocess to handle
             -- @conn@) before proper cleanup of @conn@ is your case
+
             forkFinally (runQueueHandlers connection requestQueue responseQueue) (closeConnection requestQueue responseQueue connection)
 
 toLengthPrefixedFrame :: ByteString -> Maybe ByteString
@@ -118,10 +121,10 @@ receiveMessage socket addr requestQueue responseQueue = do
 handleRequest :: Socket -> SockAddr -> Char -> RequestQueue -> ResponseQueue -> IO ()
 handleRequest socket addr '+' requestQueue responseQueue = do
   topicPattern <- readLengthPrefixedFrame socket
-  atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" $ BSU.toString topicPattern)) responseQueue)
+  atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" $ BSU.toString topicPattern)) (responseQueue, addr))
 handleRequest socket addr '-' requestQueue responseQueue = do
   topicPattern <- readLengthPrefixedFrame socket
-  atomically $ writeTBQueue (coerce requestQueue) (UnsubRequest (Topic (splitOn "/" $ BSU.toString topicPattern)) responseQueue)
+  atomically $ writeTBQueue (coerce requestQueue) (UnsubRequest (Topic (splitOn "/" $ BSU.toString topicPattern)) (responseQueue, addr))
 handleRequest socket addr '@' requestQueue _ = do
   topic <- readLengthPrefixedFrame socket
   message <- readLengthPrefixedFrame socket

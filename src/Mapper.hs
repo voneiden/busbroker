@@ -147,6 +147,7 @@ relayResponse (RequestQueue requestQueue) (PubResponse _ message) (Mapping _ (In
 runMapping :: RequestQueue -> ResponseQueue -> Mapping -> IO ()
 runMapping requestQueue (ResponseQueue responseQueue) mapping = do
   response <- atomically $ readTBQueue responseQueue
+  _ <- putStrLn $ "Mapper received: " ++ show response
   relayResponse requestQueue response mapping
 
 sockAddr :: SockAddr
@@ -156,25 +157,26 @@ setupMapping :: RequestQueue -> Mapping -> IO ()
 setupMapping requestQueue (Mapping (Output output) (Input input)) = do
   --putStrLn $ "Setup mapping " ++ show output ++ "->" ++show input
   responseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
-  _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" output)) responseQueue)
+  _ <- putStrLn $ "Mapper sub:" ++ show (Topic (splitOn "/" output))
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" output)) (responseQueue, sockAddr))
   _ <- forkIO $ forever $ runMapping requestQueue responseQueue (Mapping (Output output) (Input input))
   return ()
 
 respondPing :: RequestQueue -> ResponseQueue -> IO ()
 respondPing pongQueue pingQueue = do
-  ping <- atomically $ readTBQueue (coerce pingQueue) 
-  case ping of 
+  ping <- atomically $ readTBQueue (coerce pingQueue)
+  case ping of
     PingResponse t ->
-      atomically $ writeTBQueue (coerce pongQueue) (PongRequest sockAddr t)   
-    _ -> 
+      atomically $ writeTBQueue (coerce pongQueue) (PongRequest sockAddr t)
+    _ ->
       return ()
-   
+
 
 runMapper :: RequestQueue -> IO ()
 runMapper requestQueue = do
   pingResponseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
   _ <- atomically $ writeTBQueue (coerce requestQueue) (IdentifyRequest sockAddr (Just pingResponseQueue))
-  _ <- forkIO $ forever $ respondPing requestQueue pingResponseQueue 
+  _ <- forkIO $ forever $ respondPing requestQueue pingResponseQueue
   mappings <- setup
   putStrLn $ "Loaded " ++ show (length mappings) ++ " mappings"
   mapM_ (setupMapping requestQueue) mappings

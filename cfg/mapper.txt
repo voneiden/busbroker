@@ -37,14 +37,14 @@ sx/10/o/1/31/ -> sim/i/test31/
 sx/10/o/1/32/ -> sim/i/test32/
 sx/10/o/1/33/ -> sim/i/test33/
 sx/10/o/1/34/ -> sim/i/test34/
-sx/10/o/1/35/ -> sim/i/test35/
+#sx/10/o/1/35/ -> sim/i/test35/
 sx/10/o/1/36/ -> sim/i/test36/
 sx/10/o/1/37/ -> sim/i/test37/
 sx/10/o/1/38/ -> sim/i/test38/
 sx/10/o/1/39/ -> sim/i/test39/
 sx/10/o/1/40/ -> sim/i/test40/
 sx/10/o/1/41/ -> sim/i/test41/
-sx/10/o/1/42/ -> sim/i/test42/
+#sx/10/o/1/42/ -> sim/i/test42/
 sx/10/o/1/43/ -> sim/i/test43/
 sx/10/o/1/44/ -> sim/i/test44/
 sx/10/o/1/45/ -> sim/i/test45/
