@@ -12,18 +12,25 @@ import Data.ByteString.UTF8 (ByteString)
 import qualified Data.ByteString.UTF8 as BSU
 import Data.Char (chr)
 import Data.Coerce (coerce)
-import Network.Socket (Socket, getPeerName, SockAddr)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.List (intercalate)
+import Data.List.Split (splitOn)
+import Network.Socket (SockAddr, Socket, getPeerName)
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as SBS (recv, sendAll)
 import RouterTypes
-import Data.List.Split (splitOn)
-import Data.List (intercalate)
 
-closeConnection :: RequestQueue -> ResponseQueue -> Socket -> b -> IO ()
-closeConnection requestQueue responseQueue connection _ = do
+closeConnection :: RequestQueue -> ResponseQueue -> IORef (Maybe SockAddr) -> Socket -> b -> IO ()
+closeConnection requestQueue responseQueue sockAddrRef connection _ = do
   -- todo this might crash?
-  addr <- getPeerName connection
-  _ <- atomically $ writeTBQueue (coerce requestQueue) (UnsubAllRequest (responseQueue, addr))
+  _ <- putStrLn "Closing socket" 
+  maybeSockAddr <- readIORef sockAddrRef
+  _ <- case maybeSockAddr of
+    Just addr -> do
+      _ <- atomically $ writeTBQueue (coerce requestQueue) (UnsubAllRequest (responseQueue, addr))
+      atomically $ writeTBQueue (coerce requestQueue) (UnidentifyRequest addr (Just responseQueue))
+    Nothing -> return ()
+  _ <- putStrLn "Cleanup done"
   Socket.gracefulClose connection 5000
 
 runTCPServer :: Maybe Socket.HostName -> Socket.ServiceName -> RequestQueue -> IO a
@@ -50,13 +57,14 @@ runTCPServer host port requestQueue = Socket.withSocketsDo $ do
       E.bracketOnError (Socket.accept sock) (Socket.close . fst) $
         \(connection, _peer) -> do
           responseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
+          sockAddrRef <- newIORef (Nothing :: Maybe SockAddr)
           void $
             -- 'forkFinally' alone is unlikely to fail thus leaking @conn@,
             -- but 'E.bracketOnError' above will be necessary if some
             -- non-atomic setups (e.g. spawning a subprocess to handle
             -- @conn@) before proper cleanup of @conn@ is your case
 
-            forkFinally (runQueueHandlers connection requestQueue responseQueue) (closeConnection requestQueue responseQueue connection)
+            forkFinally (runQueueHandlers connection requestQueue responseQueue sockAddrRef) (closeConnection requestQueue responseQueue sockAddrRef connection)
 
 toLengthPrefixedFrame :: ByteString -> Maybe ByteString
 toLengthPrefixedFrame bs
@@ -76,10 +84,19 @@ sendResponse socket (PubResponse (Topic topic) (Message message)) =
           ioError $ userError "Message too long to publish"
     Nothing ->
       ioError $ userError "Topic too long to publish"
+sendResponse socket (PingResponse ping) =
+  case toLengthPrefixedFrame (BSU.fromString $ show ping) of
+    Just bsPing ->
+      SBS.sendAll socket (BS.concat ["P", bsPing])
+    Nothing ->
+      ioError $ userError "Message too long to publish"
+sendResponse _ (StatsResponse _) = return ()
 
-runQueueHandlers :: Socket -> RequestQueue -> ResponseQueue -> IO ()
-runQueueHandlers socket requestQueue responseQueue = do
+runQueueHandlers :: Socket -> RequestQueue -> ResponseQueue -> IORef (Maybe SockAddr) -> IO ()
+runQueueHandlers socket requestQueue responseQueue sockAddrRef = do
   addr <- getPeerName socket
+  _ <- writeIORef sockAddrRef (Just addr)
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (IdentifyRequest addr (Just responseQueue))
   _ <- forkIO (forever $ deliverMessage socket addr responseQueue)
   forever $ receiveMessage socket addr requestQueue responseQueue
 
