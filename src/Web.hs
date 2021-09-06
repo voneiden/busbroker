@@ -1,19 +1,25 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 -- User.hs
 module Web (runScotty) where
 
-import Data.Aeson (FromJSON, ToJSON)
-import GHC.Generics
-import Control.Monad.IO.Class
-import Data.Text
 --import qualified Db
 --import User (CreateUserRequest (..))
-import Web.Scotty (json, scotty, post, jsonData, ActionM, get, raise)
-import RouterTypes
-import Control.Concurrent.STM (atomically, newTBQueue, writeTBQueue, readTBQueue)
+
+import Control.Concurrent.STM (atomically, flushTBQueue, newTBQueue, readTBQueue, writeTBQueue)
+import Control.Monad.IO.Class
+import Data.Aeson (FromJSON, ToJSON)
+import qualified Data.ByteString.UTF8 as BSU
 import Data.Coerce (coerce)
 import Data.List as List
+import Data.Text
+import GHC.Generics
+import Network.Socket (SockAddr (SockAddrUnix))
+import RouterTypes
+import Web.Scotty (ActionM, get, json, jsonData, post, raise, scotty, middleware)
+import Data.Maybe (mapMaybe)
+import Network.Wai.Middleware.Cors (simpleCors)
 
 data User = User
   { userId :: Text,
@@ -32,10 +38,10 @@ data CreateUserRequest = CreateUserRequest
 -- because we will want to parse it from a HTTP request
 -- body (JSON).
 instance FromJSON CreateUserRequest
+
 instance ToJSON CreateUserRequest
 
-
-data Stats = Stats
+data ConnectionStats = ConnectionStats
   { sockAddr :: String,
     ping :: Integer,
     created :: Integer,
@@ -44,39 +50,72 @@ data Stats = Stats
   }
   deriving (Show, Generic)
 
+data MessageData = MessageData
+  { topic :: [String],
+    message :: String
+  }
+  deriving (Show, Generic)
+
+data ResponseData = ResponseData
+  { connectionStats :: [ConnectionStats],
+    messages :: [MessageData]
+  }
+  deriving (Show, Generic)
+
 --data StatsWrapper = StatsWrapper { stats :: [Stats]}
 
-instance FromJSON Stats
-instance ToJSON Stats
+instance FromJSON ConnectionStats
 
-convertStats :: QueueStatistics -> Stats
+instance ToJSON ConnectionStats
+
+instance FromJSON MessageData
+
+instance ToJSON MessageData
+
+instance FromJSON ResponseData
+
+instance ToJSON ResponseData
+
+convertStats :: QueueStatistics -> ConnectionStats
 convertStats stats =
-  Stats (show $ queueSockAddr stats) (queuePing stats) (queueCreated stats) (queueMessagesIn stats) (queueMessagesOut stats)
+  ConnectionStats (show $ queueSockAddr stats) (queuePing stats) (queueCreated stats) (queueMessagesIn stats) (queueMessagesOut stats)
+
+convertMessage :: Response -> Maybe MessageData
+convertMessage response =
+  case response of
+    PubResponse (Topic topic') (Message message') ->
+      Just
+        MessageData
+          { topic = topic',
+            message = BSU.toString message'
+          }
+
+    _ -> Nothing
+getSockAddr :: SockAddr
+getSockAddr = SockAddrUnix "REST"
 
 runScotty :: RequestQueue -> IO ()
-runScotty statsRequestQueue = do
+runScotty requestQueue = do
+  statsResponseQueue <- atomically $ newTBQueue 1
+  pubResponseQueue <- atomically $ newTBQueue 1000
+  -- Subscribe to everything
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic ["#"]) (ResponseQueue pubResponseQueue, getSockAddr))
+
   -- Run the scotty web app on port 8080
-  statsResponseQueue <- atomically $ newTBQueue 1000
   scotty 18080 $ do
     -- Listen for POST requests on the "/users" endpoint
+    middleware simpleCors
     get "/stats" $
       do
-        _ <- liftIO $ atomically $ writeTBQueue (coerce statsRequestQueue) (StatsRequest (ResponseQueue statsResponseQueue))
+        _ <- liftIO $ atomically $ writeTBQueue (coerce requestQueue) (StatsRequest (ResponseQueue statsResponseQueue))
         stats <- liftIO $ atomically $ readTBQueue statsResponseQueue
-        case stats of 
-          StatsResponse stats' -> 
-            json $ List.map convertStats (coerce stats')
-          _ -> 
+        messages' <- liftIO $ atomically $ flushTBQueue pubResponseQueue
+        case stats of
+          StatsResponse stats' ->
+            json $
+              ResponseData
+                { connectionStats = List.map convertStats (coerce stats')
+                , messages = mapMaybe convertMessage messages'
+                }
+          _ ->
             raise "Oh crap"
-        -- parse the request body into our CreateUserRequest type
-        --createUserReq <- jsonData :: ActionM CreateUserRequest
-        --let x = [Stats "test" 1 2 3 4]
-        --json x
-        -- Create our new user.
-        -- In order for this compile we need to use liftIO here to lift the IO from our
-        -- createUser function. This is because the `post` function from scotty expects an
-        -- ActionM action instead of an IO action
-        --newUserId <- liftIO $ createUser createUserReq
-
-        -- Return the user ID of the new user in the HTTP response
-        --

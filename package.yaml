@@ -27,6 +27,7 @@ dependencies:
 - aeson
 - text
 - time
+- wai-cors
 
 
 library:
