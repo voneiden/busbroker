@@ -61,12 +61,8 @@ handleRequest (PubRequest addr topic message) routeMap queueStatisticsMap pings 
   let routeSockAddrs = findRoutes routeMap topic
   let routes = List.map fst routeSockAddrs
   let sockAddrs = List.map snd routeSockAddrs
-  -- TODO record stats
-  _ <- putStrLn $ show $ length routes
-  _ <- putStrLn $ show $ sockAddrs
   queueStatisticsMap'' <- foldM (flip recordStatsIn) queueStatisticsMap' sockAddrs
   _ <- atomically $ sendResponses (PubResponse topic message) routes
-  --putStrLn $ "Delivered to " ++ show (length routes) ++ " queues"
   return (routeMap, queueStatisticsMap'', pings)
 
 handleRequest (IdentifyRequest addr maybeRequestQueue) routeMap queueStatisticsMap (PingResponseQueues pings) = do
@@ -101,11 +97,8 @@ handleRequest (StatsRequest responseQueue) routeMap queueStatisticsMap pings = d
 
 router :: RequestQueue -> RouteMap -> QueueStatisticsMap -> PingResponseQueues -> IO ()
 router (RequestQueue requestQueue) routeMap stats pings = do
-  --putStrLn "Router waiting for messages"
   request <- atomically $ readTBQueue requestQueue
   (routeMap', stats', pings') <- handleRequest request routeMap stats pings
-  --print stats'
-  --putStrLn "Processing done"
   router (RequestQueue requestQueue) routeMap' stats' pings'
 
 pingAll :: RequestQueue -> IO ()

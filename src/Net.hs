@@ -19,11 +19,17 @@ import Network.Socket (SockAddr, Socket, getPeerName)
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as SBS (recv, sendAll)
 import RouterTypes
+import Control.Exception (SomeException)
 
-closeConnection :: RequestQueue -> ResponseQueue -> IORef (Maybe SockAddr) -> Socket -> b -> IO ()
-closeConnection requestQueue responseQueue sockAddrRef connection _ = do
-  -- todo this might crash?
-  _ <- putStrLn "Closing socket" 
+closeConnection :: RequestQueue -> ResponseQueue -> IORef (Maybe SockAddr) -> Socket -> Either SomeException a -> IO ()
+closeConnection requestQueue responseQueue sockAddrRef connection result = do
+  _ <- putStrLn "Closing socket"
+  _ <- case result of
+        Left ex -> do
+          print ex
+        Right _ -> do
+          putStrLn "No error"
+
   maybeSockAddr <- readIORef sockAddrRef
   _ <- case maybeSockAddr of
     Just addr -> do
@@ -86,7 +92,7 @@ sendResponse socket (PubResponse (Topic topic) (Message message)) =
       ioError $ userError "Topic too long to publish"
 sendResponse socket (PingResponse ping) =
   case toLengthPrefixedFrame (BSU.fromString $ show ping) of
-    Just bsPing ->
+    Just bsPing -> do
       SBS.sendAll socket (BS.concat ["P", bsPing])
     Nothing ->
       ioError $ userError "Message too long to publish"
@@ -138,12 +144,20 @@ receiveMessage socket addr requestQueue responseQueue = do
 handleRequest :: Socket -> SockAddr -> Char -> RequestQueue -> ResponseQueue -> IO ()
 handleRequest socket addr '+' requestQueue responseQueue = do
   topicPattern <- readLengthPrefixedFrame socket
+  _ <- putStrLn $ "+Sub: " ++ show topicPattern
   atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" $ BSU.toString topicPattern)) (responseQueue, addr))
 handleRequest socket addr '-' requestQueue responseQueue = do
   topicPattern <- readLengthPrefixedFrame socket
+  _ <- putStrLn $ "-Unsub: " ++ show topicPattern
   atomically $ writeTBQueue (coerce requestQueue) (UnsubRequest (Topic (splitOn "/" $ BSU.toString topicPattern)) (responseQueue, addr))
 handleRequest socket addr '@' requestQueue _ = do
   topic <- readLengthPrefixedFrame socket
   message <- readLengthPrefixedFrame socket
+  _ <- putStrLn $ "@Pub: " ++ show topic ++ " " ++ "" ++ show message 
   atomically $ writeTBQueue (coerce requestQueue) (PubRequest addr (Topic (splitOn "/" $ BSU.toString topic)) (Message message))
-handleRequest _ _ _ _ _ = ioError $ userError "Unknown command"
+handleRequest socket addr 'P' requestQueue _ = do
+  pong <- readLengthPrefixedFrame socket
+  atomically $ writeTBQueue (coerce requestQueue) (PongRequest addr (read $ BSU.toString pong))
+handleRequest socket _ cmd _ _ = do
+  b <- SBS.recv socket 1024
+  ioError $ userError $ "Unknown command: " ++ show cmd
