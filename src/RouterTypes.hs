@@ -7,6 +7,7 @@ import Data.ByteString (ByteString)
 import Data.Map.Strict (Map)
 import Network.Socket (SockAddr)
 import GHC.Generics (Generic)
+import Data.Word (Word8)
 
 newtype Message = Message ByteString deriving (Show)
 
@@ -26,7 +27,12 @@ data Request
   | StatsRequest ResponseQueue
 
 -- Responses are processed by those who request
-data Response = PubResponse Topic Message | PingResponse Integer | StatsResponse [QueueStatistics] deriving (Show)
+data Response 
+  = PubResponse Topic Message 
+  | PingResponse Integer 
+  | StatsResponse [QueueStatistics]
+  | ReconfigureMacResponse Word8
+  deriving (Show)
 
 newtype RequestQueue = RequestQueue (TBQueue Request)
 

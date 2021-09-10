@@ -12,6 +12,7 @@ import Network.Socket (SockAddr)
 import Stats
 import Control.Concurrent (threadDelay, forkIO)
 import Control.Monad (forever, foldM)
+import Data.Char (ord)
 
 matchTopic :: Topic -> Topic -> Bool
 matchTopic (Topic subTopic) (Topic pubTopic) = matchTopic' subTopic pubTopic
@@ -66,13 +67,27 @@ handleRequest (PubRequest addr topic message) routeMap queueStatisticsMap pings 
   return (routeMap, queueStatisticsMap'', pings)
 
 handleRequest (IdentifyRequest addr maybeRequestQueue) routeMap queueStatisticsMap (PingResponseQueues pings) = do
-  queueStatisticsMap' <- recordIdentify addr queueStatisticsMap
-  let pings' = case maybeRequestQueue of
-                  Just queue ->
-                    queue : pings
-                  Nothing ->
-                    pings
-  return (routeMap, queueStatisticsMap', PingResponseQueues pings')
+  let strAddr = show addr
+  putStrLn $ "Identify: " ++ strAddr
+  if strAddr == "192.168.69.250:42069"
+  then do
+    putStr "Provide new ID for this device: "
+    newMac <- getLine
+    _ <- case maybeRequestQueue of
+      Just queue ->
+        atomically $ writeTBQueue (coerce queue) (ReconfigureMacResponse (fromIntegral $ ord (head newMac)))
+      Nothing ->
+        putStrLn "Unable to reconfigure this client, there is no response queue available"
+    putStrLn " .. ok"
+    return (routeMap, queueStatisticsMap, PingResponseQueues pings)
+  else do
+    queueStatisticsMap' <- recordIdentify addr queueStatisticsMap
+    let pings' = case maybeRequestQueue of
+                    Just queue ->
+                      queue : pings
+                    Nothing ->
+                      pings
+    return (routeMap, queueStatisticsMap', PingResponseQueues pings')
 
 
 handleRequest (UnidentifyRequest addr maybeRequestQueue) routeMap queueStatisticsMap (PingResponseQueues pings) = do

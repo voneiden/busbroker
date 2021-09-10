@@ -97,6 +97,9 @@ sendResponse socket (PingResponse ping) =
     Nothing ->
       ioError $ userError "Message too long to publish"
 sendResponse _ (StatsResponse _) = return ()
+sendResponse socket (ReconfigureMacResponse newMac) = do 
+  putStrLn $ show $ BS.snoc (BSU.fromString "M") newMac
+  SBS.sendAll socket (BS.snoc (BSU.fromString "M") newMac)
 
 runQueueHandlers :: Socket -> RequestQueue -> ResponseQueue -> IORef (Maybe SockAddr) -> IO ()
 runQueueHandlers socket requestQueue responseQueue sockAddrRef = do
@@ -153,7 +156,7 @@ handleRequest socket addr '-' requestQueue responseQueue = do
 handleRequest socket addr '@' requestQueue _ = do
   topic <- readLengthPrefixedFrame socket
   message <- readLengthPrefixedFrame socket
-  _ <- putStrLn $ "@Pub: " ++ show topic ++ " " ++ "" ++ show message 
+  _ <- putStrLn $ "@Pub: " ++ show topic ++ " " ++ "" ++ show message
   atomically $ writeTBQueue (coerce requestQueue) (PubRequest addr (Topic (splitOn "/" $ BSU.toString topic)) (Message message))
 handleRequest socket addr 'P' requestQueue _ = do
   pong <- readLengthPrefixedFrame socket
