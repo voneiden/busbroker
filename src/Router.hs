@@ -63,7 +63,8 @@ handleRequest (PubRequest addr topic message) routeMap queueStatisticsMap pings 
   let routes = List.map fst routeSockAddrs
   let sockAddrs = List.map snd routeSockAddrs
   queueStatisticsMap'' <- foldM (flip recordStatsIn) queueStatisticsMap' sockAddrs
-  _ <- atomically $ sendResponses (PubResponse topic message) routes
+  timestamp <- epoch 
+  _ <- atomically $ sendResponses (PubResponse topic message (Timestamp timestamp)) routes
   return (routeMap, queueStatisticsMap'', pings)
 
 handleRequest (IdentifyRequest addr maybeRequestQueue) routeMap queueStatisticsMap (PingResponseQueues pings) = do

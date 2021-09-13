@@ -28,6 +28,8 @@ dependencies:
 - text
 - time
 - wai-cors
+- http-types
+- base64-bytestring
 
 
 library:
@@ -35,7 +37,7 @@ library:
   - src
 
 executables:
-  busmaster2000-exe:
+  busbroker-exe:
     main:                Main.hs
     source-dirs:         app
     ghc-options:

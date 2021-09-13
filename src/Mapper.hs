@@ -19,17 +19,15 @@ import Control.Concurrent (forkIO)
 import Data.List.Split (splitOn)
 import Network.Socket (SockAddr (SockAddrUnix))
 
+-- TODO cacheable messages
+-- Come up with a way that a client can request all matching cached inputs to be (re)deliveredy
+
 -- sx/1/o/3 -> sim/i/SW_MAC
 newtype SXId = SXId Integer deriving (Eq, Show)
 
 newtype SXModuleId = SXModuleId Integer deriving (Eq, Show)
 
 newtype SXRegister = SXRegister Integer deriving (Eq, Show)
-
---data SX = SX SXId SXModuleId SXRegister
-
---data Endpoint = SX SXId SXModuleId SXRegister | Sim String deriving (Eq, Show)
---data Endpoint = InputTopic String | OutputTopic String deriving (Eq, Show)
 
 newtype Output = Output String deriving (Eq, Show)
 
@@ -131,7 +129,7 @@ myPairs = Parsec.many1 $ do
 parseAll :: Parsec String () [Mapping]
 parseAll = do
   myPairs <* Parsec.eof
-  
+
 
 setup :: IO [Mapping]
 setup = do
@@ -142,7 +140,7 @@ setup = do
     Right mapping -> return mapping
 
 relayResponse :: RequestQueue -> Response -> Mapping -> IO ()
-relayResponse (RequestQueue requestQueue) (PubResponse _ message) (Mapping _ (Input inputTopic)) = do
+relayResponse (RequestQueue requestQueue) (PubResponse _ message _) (Mapping _ (Input inputTopic)) = do
   atomically $ writeTBQueue requestQueue (PubRequest sockAddr (Topic (splitOn "/" inputTopic)) message)
 
 runMapping :: RequestQueue -> ResponseQueue -> Mapping -> IO ()

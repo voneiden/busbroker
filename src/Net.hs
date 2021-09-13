@@ -80,7 +80,7 @@ toLengthPrefixedFrame bs
     bsLength = BS.length bs
 
 sendResponse :: Socket -> Response -> IO ()
-sendResponse socket (PubResponse (Topic topic) (Message message)) =
+sendResponse socket (PubResponse (Topic topic) (Message message) _) =
   case toLengthPrefixedFrame (BSU.fromString $ intercalate "/" topic) of
     Just bsTopic ->
       case toLengthPrefixedFrame message of

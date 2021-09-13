@@ -14,6 +14,8 @@ newtype Message = Message ByteString deriving (Show)
 -- TODO use Topic [String] rather so that it is already split so we don't have to split when matching
 newtype Topic = Topic [String] deriving (Eq, Ord, Show)
 
+newtype Timestamp = Timestamp Integer deriving (Show)
+
 -- Requests are processed by Router
 data Request
   = SubRequest Topic (ResponseQueue, SockAddr)
@@ -27,9 +29,9 @@ data Request
   | StatsRequest ResponseQueue
 
 -- Responses are processed by those who request
-data Response 
-  = PubResponse Topic Message 
-  | PingResponse Integer 
+data Response
+  = PubResponse Topic Message Timestamp
+  | PingResponse Integer
   | StatsResponse [QueueStatistics]
   | ReconfigureMacResponse Word8
   deriving (Show)
