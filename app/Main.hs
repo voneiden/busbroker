@@ -4,6 +4,7 @@ import Control.Concurrent.STM (atomically, newTBQueue)
 import Net (runTCPServer)
 import Router (runRouter)
 import Mapper (runMapper)
+import WebSocket (runWebsockets)
 import Web (runScotty)
 import RouterTypes (RequestQueue (RequestQueue))
 import Control.Concurrent (forkIO)
@@ -14,6 +15,7 @@ main = do
   _ <- forkIO $ runRouter requestQueue
   _ <- forkIO $ runMapper requestQueue
   _ <- forkIO $ runScotty requestQueue
+  _ <- forkIO $ runWebsockets requestQueue
   _ <- runTCPServer Nothing "42069" requestQueue
   putStrLn "Done, good night."
   return ()

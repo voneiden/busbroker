@@ -6,7 +6,6 @@ import GHC.Generics (Generic)
 data MessageData = MessageData
   { topic :: [String],
     message :: String,
-    timestamp :: Integer,
-    id :: Integer
+    timestamp :: Integer
   }
   deriving (Show, Generic)

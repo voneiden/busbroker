@@ -30,6 +30,8 @@ dependencies:
 - wai-cors
 - http-types
 - base64-bytestring
+- websockets
+- uuid
 
 
 library:

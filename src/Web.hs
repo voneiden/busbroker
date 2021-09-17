@@ -24,11 +24,12 @@ import MessageData (MessageData (MessageData))
 import qualified MessageData
 import Network.HTTP.Types (noContent204)
 import Network.Socket (SockAddr (SockAddrUnix))
-import Network.Wai.Middleware.Cors (simpleCors)
+import Network.Wai.Middleware.Cors (simpleCors, corsRequestHeaders, simpleCorsResourcePolicy, cors)
 import RouterTypes
 import Text.Read (readMaybe)
 import Util (epoch)
 import Web.Scotty (ActionM, get, json, jsonData, middleware, param, post, raise, scotty, status)
+import Web.Scotty.Internal.Types (Middleware)
 
 data PublishMessageRequest = PublishMessageRequest
   { pubTopic :: String,
@@ -49,10 +50,8 @@ data ConnectionStats = ConnectionStats
   }
   deriving (Show, Generic)
 
-data ResponseData = ResponseData
-  { connectionStats :: [ConnectionStats],
-    messages :: [MessageData]
-  }
+newtype ResponseData
+  = ResponseData {connectionStats :: [ConnectionStats]}
   deriving (Show, Generic)
 
 --data StatsWrapper = StatsWrapper { stats :: [Stats]}
@@ -73,64 +72,49 @@ convertStats :: QueueStatistics -> ConnectionStats
 convertStats stats =
   ConnectionStats (show $ queueSockAddr stats) (queuePing stats) (queueCreated stats) (queueMessagesIn stats) (queueMessagesOut stats)
 
-convertMessage :: (Integer, Response) -> Maybe MessageData
+convertMessage :: Response -> Maybe MessageData
 convertMessage response =
   case response of
-    (id', PubResponse (Topic topic') (Message message') (Timestamp timestamp)) ->
+    PubResponse (Topic topic') (Message message') (Timestamp timestamp) ->
       Just
         MessageData
           { MessageData.topic = topic',
             MessageData.message = BSU.toString message',
-            MessageData.timestamp = timestamp,
-            MessageData.id = id'
+            MessageData.timestamp = timestamp
           }
     _ -> Nothing
 
 getSockAddr :: SockAddr
 getSockAddr = SockAddrUnix "REST"
 
-lastId :: [MessageData] -> Integer
-lastId [] = 0
-lastId xs = MessageData.id $ List.last xs
+corsWithContentType = cors (const $ Just policy)
+    where
+      policy = simpleCorsResourcePolicy
+        { corsRequestHeaders = ["Content-Type"] }
 
 runScotty :: RequestQueue -> IO ()
 runScotty requestQueue = do
   statsResponseQueue <- atomically $ newTBQueue 1
   pubResponseQueue <- atomically $ newTBQueue 1000
-  -- Subscribe to everything
-  _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic ["#"]) (ResponseQueue pubResponseQueue, getSockAddr))
-  messages <- newIORef ([] :: [MessageData])
+
   -- Run the scotty web app on port 8080
   scotty 18080 $ do
     -- Listen for POST requests on the "/users" endpoint
-    middleware simpleCors
+    middleware corsWithContentType
     get "/stats" $
       do
-        since <- param "since"
-        let since' = Data.Maybe.fromMaybe 0 (readMaybe $ Text.unpack since :: Maybe Integer)
-
         _ <- liftIO $ atomically $ writeTBQueue (coerce requestQueue) (StatsRequest (ResponseQueue statsResponseQueue))
         stats <- liftIO $ atomically $ readTBQueue statsResponseQueue
-
-        oldMessages <- liftIO $ readIORef messages
-        let lastId' = lastId oldMessages
-
-        newMessages <- liftIO $ atomically $ flushTBQueue pubResponseQueue
-        let newIds = List.take (List.length newMessages) $ iterate (1 +) (lastId' + 1)
-        let newMessages' = mapMaybe convertMessage (List.zip newIds newMessages)
-
-        let allMessages = oldMessages ++ newMessages'
-        _ <- liftIO $ writeIORef messages allMessages
 
         case stats of
           StatsResponse stats' ->
             json $
               ResponseData
-                { connectionStats = List.map convertStats (coerce stats'),
-                  messages = List.filter (\m -> MessageData.id m > since') allMessages
+                { connectionStats = List.map convertStats (coerce stats')
                 }
           _ ->
             raise "Oh crap"
+    --middleware simpleCors
     post "/cmd" $ do
       msg <- jsonData :: ActionM PublishMessageRequest
       let pubTopic' = splitOn "/" $ pubTopic msg
