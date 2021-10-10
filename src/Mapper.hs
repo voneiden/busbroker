@@ -35,8 +35,8 @@ newtype Input = Input String deriving (Eq, Show)
 
 newtype Endpoint = Endpoint String
 
-data Mapping = Mapping Output Input deriving (Eq, Show)
-
+--data Mapping = Mapping Output Input deriving (Eq, Show)
+data Mapping = Mapping Output (Either Input (Topic -> Message -> [(Topic, Message)]))
 -- This is just dum dum :(
 --instance Show Endpoint where
 --  show (SX id mod reg) = "sx/" ++ show id ++ "/" ++ output
@@ -99,32 +99,7 @@ myPairs :: Parsec String () [Mapping]
 myPairs = Parsec.many1 $ do
   output <- whiteSpace *> symbol "s" *> outputParser
   input <- reservedOp "->" *> symbol "s" *> inputParser <* whiteSpace
-  return $ Mapping (coerce output) (coerce input)
-  --case output of
-  --  SXEndpoint output' debugOutput ->
-  --    case input of
-  --      SXEndpoint input' debugInput ->
-  --        return
-  --          [ Mapping (Output output') (Input input'),
-  --            Mapping (Output output') (Input debugOutput),
-  --            Mapping (Output debugInput) (Input input')
-  --          ]
-  --      GenericEndpoint input' ->
-  --        return
-  --          [ Mapping (Output output') (Input input'),
-  --            Mapping (Output output') (Input debugOutput)
-  --          ]
-  --  GenericEndpoint output' ->
-  --    case input of
-  --      SXEndpoint input' debug ->
-  --        return
-  --          [ Mapping (Output output') (Input input'),
-  --            Mapping (Output debug) (Input input')
-  --          ]
-  --      GenericEndpoint input' ->
-  --        return
-  --          [ Mapping (Output output') (Input input')
-  --          ]
+  return $ Mapping (coerce output) (Left (coerce input))
 
 parseAll :: Parsec String () [Mapping]
 parseAll = do
@@ -139,9 +114,21 @@ setup = do
       ioError $ userError $ "unable to parse mapper_routing.txt: " ++ show er
     Right mapping -> return mapping
 
+--mapRequest :: Output -> Either Input (Output -> Message -> [(Input, Message)]) -> Message -> [(Input, Message)]
+--mapRequest _ (Left destinationTopic) message =
+--  [(destinationTopic, message)]
+--mapRequest sourceTopic (Right destinationFunc) message =
+--  destinationFunc sourceTopic message
+
 relayResponse :: RequestQueue -> Response -> Mapping -> IO ()
-relayResponse (RequestQueue requestQueue) (PubResponse _ message _) (Mapping _ (Input inputTopic)) = do
+relayResponse (RequestQueue requestQueue) (PubResponse _ message _) (Mapping _ (Left (Input inputTopic))) = do
   atomically $ writeTBQueue requestQueue (PubRequest sockAddr (Topic (splitOn "/" inputTopic)) message)
+relayResponse (RequestQueue requestQueue) (PubResponse topic message _) (Mapping _ (Right transformFunction)) = do
+  mapM_ (\(inputTopic, inputMessage) -> atomically $ writeTBQueue requestQueue (PubRequest sockAddr inputTopic inputMessage)) inputs
+    where
+      inputs = transformFunction topic message 
+relayResponse _ _ _ = return ()
+  --atomically $ writeTBQueue requestQueue (PubRequest sockAddr (Topic (splitOn "/" inputTopic)) message)
 
 runMapping :: RequestQueue -> ResponseQueue -> Mapping -> IO ()
 runMapping requestQueue (ResponseQueue responseQueue) mapping = do
@@ -153,13 +140,14 @@ sockAddr :: SockAddr
 sockAddr = SockAddrUnix "Mapper"
 
 setupMapping :: RequestQueue -> Mapping -> IO ()
-setupMapping requestQueue (Mapping (Output output) (Input input)) = do
+setupMapping requestQueue (Mapping (Output output) (Left (Input input))) = do
   --putStrLn $ "Setup mapping " ++ show output ++ "->" ++show input
   responseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
   _ <- putStrLn $ "Mapper sub:" ++ show (Topic (splitOn "/" output))
   _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" output)) (responseQueue, sockAddr))
-  _ <- forkIO $ forever $ runMapping requestQueue responseQueue (Mapping (Output output) (Input input))
+  _ <- forkIO $ forever $ runMapping requestQueue responseQueue (Mapping (Output output) (Left (Input input)))
   return ()
+setupMapping _ _ = return ()
 
 respondPing :: RequestQueue -> ResponseQueue -> IO ()
 respondPing pongQueue pingQueue = do
