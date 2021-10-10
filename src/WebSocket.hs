@@ -8,6 +8,7 @@ import Control.Exception (finally)
 import Control.Monad (forM_, forever)
 import Data.Aeson (ToJSON, encode)
 import Data.ByteString.Base64 (decodeLenient)
+import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.UTF8 as BSU
 import Data.Char (isPunctuation, isSpace)
 import Data.Coerce (coerce)
@@ -23,7 +24,7 @@ import MessageData
 import Network.Socket (SockAddr (SockAddrUnix))
 import qualified Network.WebSockets as WS
 import RouterTypes
-import qualified Data.ByteString.Base64 as B64
+import Util (epoch)
 
 instance ToJSON MessageData
 
@@ -47,6 +48,7 @@ broadcast :: Text -> ServerState -> IO ()
 broadcast message clients = do
   Text.putStrLn message
   forM_ clients $ \(_, conn) -> WS.sendTextData conn message
+
 -- TODO disconnect doesn't unsub???
 runWebsockets :: RequestQueue -> IO ()
 runWebsockets requestQueue = do
@@ -80,7 +82,6 @@ runHistory (ResponseQueue queue) ref = do
       _ ->
         return ()
 
-
 getSockAddr :: SockAddr
 getSockAddr = SockAddrUnix "WS"
 
@@ -97,6 +98,8 @@ application requestQueue state messagesHistory pending = do
         let s' = addClient client s
         history <- readIORef messagesHistory
         mapM_ (WS.sendTextData conn . encode) history
+        timestamp <- epoch
+        WS.sendTextData conn . encode $ MessageData ["_meta", "history", "end", ""] (BSU.toString $ B64.encode "true") timestamp
         return s'
       talk (ResponseQueue pubResponseQueue) client state
   where
