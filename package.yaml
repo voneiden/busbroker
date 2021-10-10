@@ -43,13 +43,14 @@ executables:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
-    #- -threaded
+    - -threaded
+    - -debug
     - -rtsopts
     - -O2
     #- -fprof-auto
-    #- '"-with-rtsopts=-N"'
-    #- '"-with-rtsopts=-N4 -Iw60 -h"'
-    - '"-with-rtsopts=-Iw60 -h"'
+    #- '"-with-rtsopts=-N1"'
+    - '"-with-rtsopts=-N1 -Iw60"'
+    # - '"-with-rtsopts=-Iw60 -h"'
     # Try -Iw60 not available yet and sequential garbage collection
     dependencies:
     - busbroker
