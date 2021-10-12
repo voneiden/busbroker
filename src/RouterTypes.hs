@@ -49,7 +49,7 @@ data QueueStatistics = QueueStatistics
     queueMessagesIn :: Integer,
     queueMessagesOut :: Integer
   }
-  deriving (Show)
+  deriving (Show, Generic)
 
 newtype QueueStatisticsMap = QueueStatisticsMap (Map SockAddr QueueStatistics) deriving (Show)
 newtype PingResponseQueues = PingResponseQueues [ResponseQueue]
