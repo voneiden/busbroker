@@ -43,11 +43,11 @@ newtype ResponseQueue = ResponseQueue (TBQueue Response) deriving (Eq)
 newtype RouteMap = RouteMap (Map Topic [(ResponseQueue, SockAddr)])
 
 data QueueStatistics = QueueStatistics
-  { queueSockAddr :: SockAddr,
-    queuePing :: Integer,
-    queueCreated :: Integer,
-    queueMessagesIn :: Integer,
-    queueMessagesOut :: Integer
+  { sockAddr :: SockAddr,
+    ping :: Integer,
+    created :: Integer,
+    messagesIn :: Integer,
+    messagesOut :: Integer
   }
   deriving (Show, Generic)
 

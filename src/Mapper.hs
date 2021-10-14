@@ -122,9 +122,9 @@ setup = do
 
 relayResponse :: RequestQueue -> Response -> Mapping -> IO ()
 relayResponse (RequestQueue requestQueue) (PubResponse _ message _) (Mapping _ (Left (Input inputTopic))) = do
-  atomically $ writeTBQueue requestQueue (PubRequest sockAddr (Topic (splitOn "/" inputTopic)) message)
+  atomically $ writeTBQueue requestQueue (PubRequest serviceIdentifier (Topic (splitOn "/" inputTopic)) message)
 relayResponse (RequestQueue requestQueue) (PubResponse topic message _) (Mapping _ (Right transformFunction)) = do
-  mapM_ (\(inputTopic, inputMessage) -> atomically $ writeTBQueue requestQueue (PubRequest sockAddr inputTopic inputMessage)) inputs
+  mapM_ (\(inputTopic, inputMessage) -> atomically $ writeTBQueue requestQueue (PubRequest serviceIdentifier inputTopic inputMessage)) inputs
     where
       inputs = transformFunction topic message 
 relayResponse _ _ _ = return ()
@@ -136,15 +136,15 @@ runMapping requestQueue (ResponseQueue responseQueue) mapping = do
   _ <- putStrLn $ "Mapper received: " ++ show response
   relayResponse requestQueue response mapping
 
-sockAddr :: SockAddr
-sockAddr = SockAddrUnix "Mapper"
+serviceIdentifier :: SockAddr
+serviceIdentifier = SockAddrUnix "Mapper"
 
 setupMapping :: RequestQueue -> Mapping -> IO ()
 setupMapping requestQueue (Mapping (Output output) (Left (Input input))) = do
   --putStrLn $ "Setup mapping " ++ show output ++ "->" ++show input
   responseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
   _ <- putStrLn $ "Mapper sub:" ++ show (Topic (splitOn "/" output))
-  _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" output)) (responseQueue, sockAddr))
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic (splitOn "/" output)) (responseQueue, serviceIdentifier))
   _ <- forkIO $ forever $ runMapping requestQueue responseQueue (Mapping (Output output) (Left (Input input)))
   return ()
 setupMapping _ _ = return ()
@@ -154,7 +154,7 @@ respondPing pongQueue pingQueue = do
   ping <- atomically $ readTBQueue (coerce pingQueue)
   case ping of
     PingResponse t ->
-      atomically $ writeTBQueue (coerce pongQueue) (PongRequest sockAddr t)
+      atomically $ writeTBQueue (coerce pongQueue) (PongRequest serviceIdentifier t)
     _ ->
       return ()
 
@@ -162,7 +162,7 @@ respondPing pongQueue pingQueue = do
 runMapper :: RequestQueue -> IO ()
 runMapper requestQueue = do
   pingResponseQueue <- atomically $ ResponseQueue <$> newTBQueue 1000
-  _ <- atomically $ writeTBQueue (coerce requestQueue) (IdentifyRequest sockAddr (Just pingResponseQueue))
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (IdentifyRequest serviceIdentifier (Just pingResponseQueue))
   _ <- forkIO $ forever $ respondPing requestQueue pingResponseQueue
   mappings <- setup
   putStrLn $ "Loaded " ++ show (length mappings) ++ " mappings"

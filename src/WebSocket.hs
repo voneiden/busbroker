@@ -6,7 +6,7 @@ import Control.Concurrent (MVar, forkIO, modifyMVar, modifyMVar_, newMVar, readM
 import Control.Concurrent.STM (atomically, flushTBQueue, newTBQueue, peekTBQueue, readTBQueue, writeTBQueue)
 import Control.Exception (finally)
 import Control.Monad (forM_, forever)
-import Data.Aeson (FromJSON, ToJSON (..), decode, encode, object, (.=))
+import Data.Aeson (FromJSON, ToJSON (..), decode, encode, object, (.=), Value (..))
 import Data.ByteString.Base64 (decodeLenient)
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy.UTF8 as LBSU
@@ -29,30 +29,24 @@ import qualified Network.WebSockets as WS
 import RouterTypes
 import Util (epoch)
 
+-- Instances needed for json conversions
+
 instance ToJSON MessageData
 
 instance FromJSON MessageData
 
 instance ToJSON QueueStatistics
 
---instance Generic SockAddr
-
 instance ToJSON SockAddr where
   toJSON (SockAddrInet port addr) =
     let ip = IP.fromHostAddress addr
-     in object
-          [ "addr" .= show ip,
-            "port" .= show port
-          ]
+     in String (Text.pack (show ip ++ ":" ++ show port))
   toJSON (SockAddrInet6 port _ addr _) =
     let ip = IP.fromHostAddress6 addr
-     in object
-          [ "addr" .= show ip,
-            "port" .= show port
-          ]
+     in String (Text.pack  (show ip ++ ":" ++ show port))
   toJSON (SockAddrUnix path) =
-    object ["path" .= show path]
-
+    String (Text.pack path)
+    
 type Client = (UUID, WS.Connection)
 
 type ServerState = [Client]
@@ -80,12 +74,12 @@ runWebsockets requestQueue = do
   state <- newMVar newServerState
   messagesHistory <- newIORef ([] :: [MessageData])
   pubHistoryResponseQueue <- atomically $ newTBQueue 1000
-  _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic ["#"]) (ResponseQueue pubHistoryResponseQueue, getSockAddr))
-  forkIO $ runHistory (ResponseQueue pubHistoryResponseQueue) messagesHistory
-  WS.runServer "127.0.0.1" 9160 $ application requestQueue state messagesHistory
+  _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic ["#"]) (ResponseQueue pubHistoryResponseQueue, serviceIdentifier))
+  forkIO $ collectHistory (ResponseQueue pubHistoryResponseQueue) messagesHistory
+  WS.runServer "127.0.0.1" 9160 $ connectionHandler requestQueue state messagesHistory
 
-convertMessage :: Response -> Maybe MessageData
-convertMessage response =
+responseToMessageData :: Response -> Maybe MessageData
+responseToMessageData response =
   case response of
     PubResponse (Topic topic') (Message message') (Timestamp timestamp) ->
       Just
@@ -96,27 +90,30 @@ convertMessage response =
           }
     _ -> Nothing
 
-runHistory :: ResponseQueue -> IORef [MessageData] -> IO ()
-runHistory (ResponseQueue queue) ref = do
+
+-- | Run forever and store received messages into an IO ref
+collectHistory :: ResponseQueue -> IORef [MessageData] -> IO ()
+collectHistory (ResponseQueue queue) ref = do
   forever $ do
     newMessage <- atomically $ readTBQueue queue
     oldMessages <- readIORef ref
-    case convertMessage newMessage of
+    case responseToMessageData newMessage of
       Just message' ->
         writeIORef ref (oldMessages ++ [message'])
       _ ->
         return ()
 
-getSockAddr :: SockAddr
-getSockAddr = SockAddrUnix "WS"
+serviceIdentifier :: SockAddr
+serviceIdentifier = SockAddrUnix "WS"
 
-application :: RequestQueue -> MVar ServerState -> IORef [MessageData] -> WS.ServerApp
-application requestQueue state messagesHistory pending = do
+
+connectionHandler :: RequestQueue -> MVar ServerState -> IORef [MessageData] -> WS.ServerApp
+connectionHandler requestQueue state messagesHistory pending = do
   conn <- WS.acceptRequest pending
   WS.withPingThread conn 30 (return ()) $ do
     pubResponseQueue <- atomically $ newTBQueue 1000
     uuid <- nextRandom
-    _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic ["#"]) (ResponseQueue pubResponseQueue, getSockAddr))
+    _ <- atomically $ writeTBQueue (coerce requestQueue) (SubRequest (Topic ["#"]) (ResponseQueue pubResponseQueue, serviceIdentifier))
 
     -- Fork a listening thread
     let client = (uuid, conn)
@@ -125,23 +122,26 @@ application requestQueue state messagesHistory pending = do
     flip finally (disconnect client pubResponseQueue requestHandler) $ do
       modifyMVar_ state $ \s -> do
         let s' = addClient client s
+
+        -- Dump history into websocket
+        -- TODO: maybe limit the amount of history to dump? :)
         history <- readIORef messagesHistory
         mapM_ (WS.sendTextData conn . encode) history
         t <- epoch
         WS.sendTextData conn . encode $ MessageData ["_meta", "history", "end", ""] (BSU.toString $ B64.encode "true") t
         return s'
-      talk (ResponseQueue pubResponseQueue) client state
+      forever $ passMessageToClient (ResponseQueue pubResponseQueue) client state
   where
     disconnect conn pubResponseQueue requestHandler = do
-      _ <- atomically $ writeTBQueue (coerce requestQueue) (UnsubAllRequest (ResponseQueue pubResponseQueue, getSockAddr))
+      _ <- atomically $ writeTBQueue (coerce requestQueue) (UnsubAllRequest (ResponseQueue pubResponseQueue, serviceIdentifier))
       _ <- killThread requestHandler
       modifyMVar state $ \s ->
         let s' = removeClient conn s in return (s', s')
 
-talk :: ResponseQueue -> Client -> MVar ServerState -> IO ()
-talk (ResponseQueue pubResponseQueue) (_, conn) state = forever $ do
+passMessageToClient :: ResponseQueue -> Client -> MVar ServerState -> IO ()
+passMessageToClient (ResponseQueue pubResponseQueue) (_, conn) state = do
   newMessage <- atomically $ readTBQueue pubResponseQueue
-  case convertMessage newMessage of
+  case responseToMessageData newMessage of
     Just message -> do
       _ <- putStrLn $ "Send msg: " ++ (show message)
       WS.sendTextData conn $ encode message
@@ -155,18 +155,22 @@ sendStats statsResponseQueue requestQueue conn = do
   case stats of
     StatsResponse stats' -> do
       t <- epoch
+      putStrLn $ "ENCODE: " ++ LBSU.toString (encode stats')
       WS.sendTextData conn . encode $ MessageData ["_meta", "stats", ""] (LBSU.toString $ encode stats') t
     _ ->
       putStrLn "Error sending stats via websocket!"
 
 handleRequests :: RequestQueue -> WS.Connection -> IO ()
-handleRequests requestQueue conn = do
+handleRequests requestQueue wsConnection = do
   statsResponseQueue <- atomically $ newTBQueue 1
   forever $ do
-    request <- WS.receiveData conn
-    let message = decode request :: Maybe MessageData
-    case message of
-      Just (MessageData topic message _) ->
-        sendStats (ResponseQueue statsResponseQueue) requestQueue conn
-      Nothing ->
+    request <- WS.receiveData wsConnection
+    putStrLn "Heyy matey, got some deita"
+    let maybeMessage = decode request :: Maybe MessageData
+    putStrLn $ show maybeMessage
+    putStrLn $ show request
+    case maybeMessage of
+      Just (MessageData ["_meta", "stats", ""] _ _) ->
+        sendStats (ResponseQueue statsResponseQueue) requestQueue wsConnection
+      _ ->
         return ()

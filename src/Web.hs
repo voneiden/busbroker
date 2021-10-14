@@ -16,7 +16,7 @@ import Data.Coerce (coerce)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List as List
 import Data.List.Split (splitOn)
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as Text
 import Data.Text.Encoding (encodeUtf8)
 import GHC.Generics
@@ -24,7 +24,7 @@ import MessageData (MessageData (MessageData))
 import qualified MessageData
 import Network.HTTP.Types (noContent204)
 import Network.Socket (SockAddr (SockAddrUnix))
-import Network.Wai.Middleware.Cors (simpleCors, corsRequestHeaders, simpleCorsResourcePolicy, cors)
+import Network.Wai.Middleware.Cors (cors, corsRequestHeaders, simpleCors, simpleCorsResourcePolicy)
 import RouterTypes
 import Text.Read (readMaybe)
 import Util (epoch)
@@ -50,8 +50,7 @@ data ConnectionStats = ConnectionStats
   }
   deriving (Show, Generic)
 
-newtype ResponseData
-  = ResponseData {connectionStats :: [ConnectionStats]}
+newtype ResponseData = ResponseData {connectionStats :: [ConnectionStats]}
   deriving (Show, Generic)
 
 --data StatsWrapper = StatsWrapper { stats :: [Stats]}
@@ -70,7 +69,7 @@ instance ToJSON ResponseData
 
 convertStats :: QueueStatistics -> ConnectionStats
 convertStats stats =
-  ConnectionStats (show $ queueSockAddr stats) (queuePing stats) (queueCreated stats) (queueMessagesIn stats) (queueMessagesOut stats)
+  ConnectionStats (show $ RouterTypes.sockAddr stats) (RouterTypes.ping stats) (RouterTypes.created stats) (RouterTypes.messagesIn stats) (RouterTypes.messagesOut stats)
 
 convertMessage :: Response -> Maybe MessageData
 convertMessage response =
@@ -88,9 +87,11 @@ getSockAddr :: SockAddr
 getSockAddr = SockAddrUnix "REST"
 
 corsWithContentType = cors (const $ Just policy)
-    where
-      policy = simpleCorsResourcePolicy
-        { corsRequestHeaders = ["Content-Type"] }
+  where
+    policy =
+      simpleCorsResourcePolicy
+        { corsRequestHeaders = ["Content-Type"]
+        }
 
 runScotty :: RequestQueue -> IO ()
 runScotty requestQueue = do

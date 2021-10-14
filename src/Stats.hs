@@ -27,18 +27,18 @@ recordIdentify addr stats = do
 recordStatsOut :: SockAddr -> QueueStatisticsMap -> IO QueueStatisticsMap
 recordStatsOut addr stats = do
   record <- getRecord addr stats
-  return $ coerce $ Map.insert addr record {queueMessagesOut = queueMessagesOut record + 1} $ coerce stats
+  return $ coerce $ Map.insert addr record {messagesOut = messagesOut record + 1} $ coerce stats
 
 recordStatsIn :: SockAddr -> QueueStatisticsMap -> IO QueueStatisticsMap
 recordStatsIn addr stats = do
   record <- getRecord addr stats
-  return $ coerce $ Map.insert addr record {queueMessagesIn = queueMessagesIn record + 1} $ coerce stats
+  return $ coerce $ Map.insert addr record {messagesIn = messagesIn record + 1} $ coerce stats
 
 recordStatsPing :: SockAddr -> QueueStatisticsMap -> Integer -> IO QueueStatisticsMap
 recordStatsPing addr stats pong = do
   now <- epoch
   record <- getRecord addr stats
-  return $ coerce $ Map.insert addr record {queuePing = now - pong} $ coerce stats
+  return $ coerce $ Map.insert addr record {ping = now - pong} $ coerce stats
 
-deleteStats :: SockAddr -> QueueStatisticsMap -> QueueStatisticsMap 
-deleteStats addr stats = QueueStatisticsMap $ Map.delete addr $ coerce stats  
+deleteStats :: SockAddr -> QueueStatisticsMap -> QueueStatisticsMap
+deleteStats addr stats = QueueStatisticsMap $ Map.delete addr $ coerce stats
